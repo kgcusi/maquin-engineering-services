@@ -117,7 +117,7 @@ export const updateUserAction = action(
   updateUserSchema,
   async (input, { user: actor, tx }) => {
     const [target] = await tx
-      .select({ id: user.id, name: user.name, role: user.role })
+      .select({ id: user.id, name: user.name, email: user.email, role: user.role })
       .from(user)
       .where(eq(user.id, input.id))
       .limit(1);
@@ -133,7 +133,25 @@ export const updateUserAction = action(
       await assertNotLastActiveAdmin(tx, input.id);
     }
 
-    await tx.update(user).set({ name: input.name, role: input.role }).where(eq(user.id, input.id));
+    // Email is the login identity; changing it stays safe because sign-in resolves
+    // the credential account by userId (account.accountId = user id, not the email),
+    // so a direct update keeps email+password login working. Only guard uniqueness
+    // when it actually changed — re-saving the same email must not false-positive.
+    if (input.email !== target.email) {
+      const clash = await tx
+        .select({ id: user.id })
+        .from(user)
+        .where(and(eq(user.email, input.email), ne(user.id, input.id)))
+        .limit(1);
+      if (clash.length > 0) {
+        throw new ActionError("That email is already registered.");
+      }
+    }
+
+    await tx
+      .update(user)
+      .set({ name: input.name, email: input.email, role: input.role })
+      .where(eq(user.id, input.id));
 
     await audit(tx, {
       actorId: actor.id,
@@ -143,6 +161,7 @@ export const updateUserAction = action(
       summary: `Updated ${target.name}`,
       diff: {
         name: { from: target.name, to: input.name },
+        email: { from: target.email, to: input.email },
         role: { from: target.role, to: input.role },
       },
     });

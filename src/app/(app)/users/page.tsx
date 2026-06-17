@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { UsersTable } from "@/components/users/users-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getSettings } from "@/modules/settings/queries";
@@ -9,7 +11,6 @@ export const metadata: Metadata = { title: "Users" };
 
 export default async function UsersPage() {
   await requirePagePermission("user.view");
-  const [users, settings] = await Promise.all([listVisibleUsers(), getSettings()]);
 
   return (
     <div className="w-full space-y-6">
@@ -21,7 +22,14 @@ export default async function UsersPage() {
         </p>
       </header>
 
-      <UsersTable users={users} timeZone={settings.timezone} />
+      <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
+        <UsersSection />
+      </Suspense>
     </div>
   );
+}
+
+async function UsersSection() {
+  const [users, settings] = await Promise.all([listVisibleUsers(), getSettings()]);
+  return <UsersTable users={users} timeZone={settings.timezone} />;
 }

@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { EmployeesTable } from "@/components/employees/employees-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { listEmployeePositions, listEmployees } from "@/modules/employees/queries";
@@ -9,11 +11,6 @@ export const metadata: Metadata = { title: "Employees" };
 
 export default async function EmployeesPage() {
   await requirePagePermission("employee.view");
-  const [employees, positions, settings] = await Promise.all([
-    listEmployees(),
-    listEmployeePositions(),
-    getSettings(),
-  ]);
 
   return (
     <div className="w-full space-y-6">
@@ -24,12 +21,26 @@ export default async function EmployeesPage() {
         </p>
       </header>
 
-      <EmployeesTable
-        employees={employees}
-        positions={positions}
-        timeZone={settings.timezone}
-        currency={settings.currency}
-      />
+      <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
+        <EmployeesSection />
+      </Suspense>
     </div>
+  );
+}
+
+async function EmployeesSection() {
+  const [employees, positions, settings] = await Promise.all([
+    listEmployees(),
+    listEmployeePositions(),
+    getSettings(),
+  ]);
+
+  return (
+    <EmployeesTable
+      employees={employees}
+      positions={positions}
+      timeZone={settings.timezone}
+      currency={settings.currency}
+    />
   );
 }

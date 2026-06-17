@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { ClientsTable } from "@/components/clients/clients-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { listClients } from "@/modules/clients/queries";
@@ -9,7 +11,6 @@ export const metadata: Metadata = { title: "Clients" };
 
 export default async function ClientsPage() {
   await requirePagePermission("client.view");
-  const [clients, settings] = await Promise.all([listClients(), getSettings()]);
 
   return (
     <div className="w-full space-y-6">
@@ -20,7 +21,14 @@ export default async function ClientsPage() {
         </p>
       </header>
 
-      <ClientsTable clients={clients} timeZone={settings.timezone} />
+      <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
+        <ClientsSection />
+      </Suspense>
     </div>
   );
+}
+
+async function ClientsSection() {
+  const [clients, settings] = await Promise.all([listClients(), getSettings()]);
+  return <ClientsTable clients={clients} timeZone={settings.timezone} />;
 }

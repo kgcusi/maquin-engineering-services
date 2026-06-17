@@ -1,5 +1,7 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 
+import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getSettings } from "@/modules/settings/queries";
@@ -9,7 +11,6 @@ export const metadata: Metadata = { title: "Suppliers" };
 
 export default async function SuppliersPage() {
   await requirePagePermission("supplier.view");
-  const [suppliers, settings] = await Promise.all([listSuppliers(), getSettings()]);
 
   return (
     <div className="w-full space-y-6">
@@ -20,7 +21,14 @@ export default async function SuppliersPage() {
         </p>
       </header>
 
-      <SuppliersTable suppliers={suppliers} timeZone={settings.timezone} />
+      <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
+        <SuppliersSection />
+      </Suspense>
     </div>
   );
+}
+
+async function SuppliersSection() {
+  const [suppliers, settings] = await Promise.all([listSuppliers(), getSettings()]);
+  return <SuppliersTable suppliers={suppliers} timeZone={settings.timezone} />;
 }

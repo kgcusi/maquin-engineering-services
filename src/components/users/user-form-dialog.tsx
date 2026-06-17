@@ -52,7 +52,7 @@ export function UserFormDialog({ open, onOpenChange, user }: Props) {
           <DialogTitle>{editing ? "Edit user" : "New user"}</DialogTitle>
           <DialogDescription>
             {editing
-              ? "Update this teammate's name or role."
+              ? "Update this teammate's email, name, or role. The email is their sign-in."
               : "Provision an account. The person signs in with the email and password you set."}
           </DialogDescription>
         </DialogHeader>
@@ -232,6 +232,7 @@ function EditForm({ user, onDone }: { user: UserRow; onDone: () => void }) {
     defaultValues: {
       id: user.id,
       name: user.name,
+      email: user.email,
       role: (user.role as UpdateUserInput["role"]) ?? "ENGINEER",
     },
   });
@@ -254,8 +255,18 @@ function EditForm({ user, onDone }: { user: UserRow; onDone: () => void }) {
       <input type="hidden" {...register("id")} />
 
       <div className="space-y-2">
-        <Label htmlFor="email-readonly">Email</Label>
-        <Input id="email-readonly" value={user.email} readOnly disabled />
+        <Label htmlFor="email" required>
+          Email
+        </Label>
+        <Input
+          id="email"
+          type="email"
+          autoComplete="off"
+          placeholder="you@firm.com"
+          disabled={isPending}
+          {...register("email")}
+        />
+        <FieldError message={errors.email?.message} />
       </div>
 
       <div className="space-y-2">

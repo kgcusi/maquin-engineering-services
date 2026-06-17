@@ -10,6 +10,8 @@ const roleField = z.enum([ROLES.ADMIN, ROLES.ENGINEER], {
 
 const nameField = z.string().trim().min(1, "Name is required").max(120, "Name is too long");
 
+const emailField = z.string().trim().toLowerCase().email("Enter a valid email");
+
 // No upper cap, but an 8-character floor (best-practice minimum). Better Auth's
 // own min/max are set to match in src/lib/auth.ts.
 const passwordField = z.string().min(8, "Use at least 8 characters");
@@ -17,7 +19,7 @@ const passwordField = z.string().min(8, "Use at least 8 characters");
 export const createUserSchema = z
   .object({
     name: nameField,
-    email: z.string().trim().toLowerCase().email("Enter a valid email"),
+    email: emailField,
     password: passwordField,
     confirmPassword: z.string().min(1, "Confirm the password"),
     role: roleField,
@@ -30,6 +32,7 @@ export const createUserSchema = z
 export const updateUserSchema = z.object({
   id: z.string().min(1),
   name: nameField,
+  email: emailField,
   role: roleField,
 });
 
