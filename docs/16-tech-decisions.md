@@ -120,8 +120,9 @@ batch large workloads across runs.
 
 Dynamic-by-default for this internal app; cache narrowly:
 
-- **`use cache`** for **System Settings / lookup tables** and **admin firm-wide report
+- **`use cache`** for **System Settings (`app_settings`)** and **admin firm-wide report
   aggregates** — not user-scoped, change rarely. Tag them (`cacheTag('settings')`, etc.).
+  (Option lists are code constants — no DB read, nothing to cache; [17](17-audit-decisions.md) §9.)
 - **PPR (Cache Components)**: static app shell + `<Suspense>`-streamed dynamic widgets
   ([10](10-dashboard.md)).
 - **Invalidate via the event bus**: domain events ([08](08-notifications.md)) call

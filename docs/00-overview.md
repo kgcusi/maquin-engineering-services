@@ -111,9 +111,12 @@ These keep the codebase and database consistent. The build must follow them.
 - **Money:** stored as integer **minor units** (e.g. centavos) or `DECIMAL(14,2)` — never
   floats. See [07-finance-design.md](07-finance-design.md).
 - **Quantities:** `DECIMAL(14,3)` to allow fractional units (e.g. 2.5 m³).
-- **Enums vs lookup tables:** values that are *stable and code-referenced* (movement types,
-  approval status) are enums; values the **admin can edit** (project statuses, categories,
-  units) live in **System Settings lookup tables**. See [04-modules.md](04-modules.md) §5.3.
+- **Fixed values are code-owned (not lookup tables).** Statuses, categories, units, and trades
+  are **fixed in code**, split by nature (see [17-audit-decisions.md](17-audit-decisions.md) §9):
+  state machines code branches on (project status, approvals, …) are Postgres **`pgEnum`**;
+  descriptive labels (units, trades, categories) are **TS const maps + a `text` code column** in
+  `src/lib/lookups.ts`; task/phase status is **derived** from progress, not stored. Only
+  `app_settings` (timezone, currency, company) and `notification_settings` stay admin-editable.
 - **IDs to humans:** every transactional record also gets a human-readable reference code,
   e.g. `MR-2026-00042`, `SI-2026-00118`, `EXP-2026-00301`. Generated server-side, never
   reused.

@@ -1,15 +1,18 @@
+import "./load-env"; // MUST be first — loads .env.local before ./client and ../lib/auth read process.env
+
 import { eq } from "drizzle-orm";
 
 import { auth } from "../lib/auth";
+import { NOTIFICATION_EVENTS, NOTIFICATION_EVENT_KEYS } from "../lib/notification-events";
 import { db } from "./client";
 import { user } from "./schema/auth";
+import { notificationSettings } from "./schema/notification-settings";
 
 // Seed the two bootstrap accounts. Idempotent (skips existing emails), so it is
-// safe to re-run. Credentials come from env — run with:
-//   pnpm db:seed   (loads .env.local; needs DATABASE_URL + BETTER_AUTH_SECRET)
+// safe to re-run. Credentials come from env (.env.local) — run with `pnpm db:seed`,
+// which needs DATABASE_URL + BETTER_AUTH_SECRET set.
 //
-// Relative imports only: this runs under tsx, which does not resolve the `@/`
-// alias.
+// Relative imports only: this runs under tsx, which does not resolve the `@/` alias.
 
 type SeedUser = {
   envPrefix: "SEED_WEBMASTER" | "SEED_ADMIN";
@@ -66,10 +69,32 @@ async function ensureUser(seed: SeedUser): Promise<void> {
       // access-control `roles` config); the column is free text and accepts our
       // custom roles at runtime, so assert through unknown.
       role: seed.role as unknown as "admin",
-      data: { isActive: true },
+      // isActive is an `input: false` field defaulting to true — passing it is
+      // ignored, so we don't.
     },
   });
   console.log(`＋ ${seed.label} created (${email}, role=${seed.role})`);
+}
+
+// Ensure one notification_settings row per catalog event (docs/08 §3). Seeded
+// INERT — `enabled: false`, IN_APP only — so the data-driven catalog exists but
+// nothing emails anyone until the firm turns an event on. Idempotent: existing
+// rows are left untouched, so a re-run never clobbers firm edits.
+async function ensureNotificationSettings(): Promise<void> {
+  for (const key of NOTIFICATION_EVENT_KEYS) {
+    const def = NOTIFICATION_EVENTS[key];
+    await db
+      .insert(notificationSettings)
+      .values({
+        eventKey: key,
+        enabled: false,
+        channels: ["IN_APP"],
+        recipientRule: def.defaultRecipientRule,
+        mode: def.defaultMode,
+      })
+      .onConflictDoNothing({ target: notificationSettings.eventKey });
+  }
+  console.log(`✓ notification settings ensured (${NOTIFICATION_EVENT_KEYS.length} events, inert)`);
 }
 
 async function main(): Promise<void> {
@@ -77,6 +102,7 @@ async function main(): Promise<void> {
   for (const seed of SEED_USERS) {
     await ensureUser(seed);
   }
+  await ensureNotificationSettings();
   console.log("Seed complete.");
 }
 

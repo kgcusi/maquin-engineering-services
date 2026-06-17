@@ -12,7 +12,9 @@ export const auditLogs = pgTable(
     actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
     action: text("action").notNull(),
     entityType: text("entity_type").notNull(),
-    entityId: uuid("entity_id"),
+    // `text`, not `uuid`: entity ids are heterogeneous — Better Auth tables use
+    // text ids (e.g. `user`), our domain tables use uuid. Both serialize as text.
+    entityId: text("entity_id"),
     summary: text("summary").notNull(),
     diff: jsonb("diff"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

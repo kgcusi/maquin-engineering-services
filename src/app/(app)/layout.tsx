@@ -25,7 +25,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
 function ShellSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       <Skeleton className="h-8 w-56" />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Skeleton className="h-28" />

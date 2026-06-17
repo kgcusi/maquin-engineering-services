@@ -18,6 +18,15 @@ import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL ?? "";
 
+if (!connectionString) {
+  // Fail loudly and clearly instead of connecting to an empty string (which
+  // surfaces later as a cryptic connection error). Next, drizzle.config.ts, and
+  // `pnpm db:seed` all load .env.local — so a miss here means it's genuinely unset.
+  throw new Error(
+    "DATABASE_URL is not set. Copy .env.example to .env.local and add your Neon pooled connection string.",
+  );
+}
+
 // Reuse one postgres connection across HMR reloads in dev to avoid exhausting
 // the pool with a new client on every hot reload.
 const globalForDb = globalThis as unknown as {

@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 
+import { ProgressBar, ProgressBarProvider } from "react-transition-progress";
+
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -43,7 +45,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <ProgressBarProvider>
+            <ProgressBar className="bg-primary fixed top-0 left-0 z-[60] h-0.5 shadow-[0_0_8px_0_var(--primary)]" />
+            {children}
+          </ProgressBarProvider>
           <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>

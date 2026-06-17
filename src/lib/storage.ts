@@ -1,4 +1,10 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // Cloudflare R2 over the S3 API (docs/16 §5). Browser uploads go DIRECT via a
@@ -52,4 +58,23 @@ export function presignUpload(
 export function presignDownload(key: string, expiresIn = 300): Promise<string> {
   const command = new GetObjectCommand({ Bucket: bucket(), Key: key });
   return getSignedUrl(s3(), command, { expiresIn });
+}
+
+/**
+ * The confirm-step check (docs/17 §5): verify the object actually landed in R2
+ * before a `files` row is marked CONFIRMED. Returns false on a missing object (or
+ * any access error) so a failed/partial upload can't be confirmed.
+ */
+export async function objectExists(key: string): Promise<boolean> {
+  try {
+    await s3().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Best-effort delete of an R2 object (when its attachment is removed). */
+export async function deleteObject(key: string): Promise<void> {
+  await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
 }

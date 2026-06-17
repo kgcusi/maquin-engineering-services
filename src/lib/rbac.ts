@@ -1,211 +1,132 @@
-import { notInArray } from "drizzle-orm";
+import { and, isNull, notInArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, type Database } from "@/db/client";
 import { user } from "@/db/schema/auth";
-import { getSession, type SessionUser } from "@/lib/session";
+import {
+  PERMISSION_KEYS,
+  ROLE_PERMISSIONS,
+  hasPermission,
+  requirePermission,
+  type Permission,
+} from "@/lib/permissions";
+import { HIDDEN_ROLES, ROLES, isHiddenRole, type Role } from "@/lib/roles";
+import { getFreshSession, isAuthorized, type SessionUser } from "@/lib/session";
 
-// ── Permission keys (docs/03 §2) — the stable contract ──────────────────────
-// Roles are just bundles of these. Guards check keys, never role strings, so a
-// new role (Storekeeper, Accountant…) is purely additive later.
-export const PERMISSION_KEYS = [
-  // Users
-  "user.view",
-  "user.create",
-  "user.update",
-  "user.deactivate",
-  // Settings
-  "settings.view",
-  "settings.manage",
-  // Audit
-  "audit.view",
-  // Directory
-  "employee.view",
-  "employee.manage",
-  "client.view",
-  "client.manage",
-  "supplier.view",
-  "supplier.manage",
-  // Projects
-  "project.view.all",
-  "project.view.assigned",
-  "project.create",
-  "project.update",
-  "project.delete",
-  // Phases / Tasks
-  "task.view",
-  "task.manage",
-  "task.update.progress",
-  // Daily Site Reports
-  "dsr.view",
-  "dsr.create",
-  "dsr.update.own",
-  "dsr.view.all",
-  // Budget
-  "budget.view",
-  "budget.manage",
-  "budget.adjust",
-  // Expenses
-  "expense.view",
-  "expense.create",
-  "expense.approve",
-  // Cash Flow
-  "cashflow.view",
-  "cashflow.manage",
-  // Approvals
-  "approval.view",
-  "approval.decide",
-  // Inventory master
-  "item.view",
-  "item.manage",
-  "location.manage",
-  // Stock-In
-  "stockin.view",
-  "stockin.create",
-  // Material Requests
-  "mr.view.assigned",
-  "mr.view.all",
-  "mr.create",
-  "mr.approve",
-  // Release / Receiving
-  "release.create",
-  "receiving.confirm",
-  // Movements
-  "movement.create",
-  "movement.approve",
-  // Ledger
-  "ledger.view",
-  // Reports
-  "report.view",
-  "report.export",
-  // Dashboard
-  "dashboard.admin",
-  "dashboard.engineer",
-  // Notifications
-  "notification.settings.manage",
-] as const;
-
-export type Permission = (typeof PERMISSION_KEYS)[number];
-
-// ── Roles ───────────────────────────────────────────────────────────────────
-export const ROLES = {
-  /** Hidden superuser — full access, never shown in any user listing. */
-  WEBMASTER: "WEBMASTER",
-  ADMIN: "ADMIN",
-  ENGINEER: "ENGINEER",
-} as const;
-
-export type Role = (typeof ROLES)[keyof typeof ROLES];
-
-// Engineer bundle (docs/03 §3 matrix; scoped to assigned projects at query time).
-// expense.create and budget.view are intentionally withheld for v1 (optional/
-// configurable per docs/03 §3–4); flip them on here when the firm decides.
-const ENGINEER_PERMISSIONS: Permission[] = [
-  "project.view.assigned",
-  "task.view",
-  "task.update.progress",
-  "dsr.view",
-  "dsr.create",
-  "dsr.update.own",
-  "mr.view.assigned",
-  "mr.create",
-  "receiving.confirm",
-  "movement.create",
-  "ledger.view",
-  "report.view",
-  "report.export",
-  "dashboard.engineer",
-];
-
-// Admin gets everything except the engineer-only / engineer-scoped duplicates.
-const ENGINEER_ONLY: Permission[] = [
-  "project.view.assigned",
-  "dsr.update.own",
-  "mr.view.assigned",
-  "dashboard.engineer",
-];
-const ADMIN_PERMISSIONS: Permission[] = PERMISSION_KEYS.filter(
-  (key) => !ENGINEER_ONLY.includes(key),
-);
-
-export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
-  // Webmaster = the whole contract. Full access, by design.
-  WEBMASTER: new Set(PERMISSION_KEYS),
-  ADMIN: new Set(ADMIN_PERMISSIONS),
-  ENGINEER: new Set(ENGINEER_PERMISSIONS),
-};
-
-// ── Hidden roles (the webmaster must never surface) ─────────────────────────
-export const HIDDEN_ROLES: readonly string[] = [ROLES.WEBMASTER];
-
-export function isHiddenRole(role: string | null | undefined): boolean {
-  return role != null && HIDDEN_ROLES.includes(role);
-}
+// The pure authorization model lives in the client/test-safe `@/lib/roles` and
+// `@/lib/permissions`. Re-export here so server callers keep one import surface
+// (`@/lib/rbac`) for the guard + the model. This file owns the DB-COUPLED parts.
+export { ROLES, HIDDEN_ROLES, isHiddenRole, type Role };
+export { PERMISSION_KEYS, ROLE_PERMISSIONS, hasPermission, requirePermission, type Permission };
 
 /**
- * Drizzle predicate that excludes hidden roles. EVERY user listing, count, and
- * approver/assignee picker MUST apply this — server-side — or the hidden
- * webmaster leaks. (There is no Users list yet; this is the contract for Stage 1.)
+ * Drizzle predicate that excludes hidden roles AND soft-deleted (archived) users.
+ * EVERY user listing, count, and approver/assignee picker MUST apply this —
+ * server-side — or the hidden webmaster leaks or an archived account resurfaces.
  */
 export function visibleUserWhere() {
-  return notInArray(user.role, HIDDEN_ROLES as string[]);
+  return and(notInArray(user.role, HIDDEN_ROLES as string[]), isNull(user.deletedAt));
 }
 
-// ── Checks ──────────────────────────────────────────────────────────────────
 function roleOf(u: SessionUser | { role?: string | null }): string | null {
   return (u as { role?: string | null }).role ?? null;
 }
 
-export function hasPermission(role: string | null | undefined, permission: Permission): boolean {
-  if (!role) return false;
-  const perms = ROLE_PERMISSIONS[role as Role];
-  return perms?.has(permission) ?? false;
-}
-
-export function requirePermission(role: string | null | undefined, permission: Permission): void {
-  if (!hasPermission(role, permission)) {
-    throw new Error(`Forbidden: missing permission "${permission}"`);
-  }
-}
-
 // ── The one Server Action guard (docs/17 §5) ────────────────────────────────
-// session → is_active → permission → validate(zod) → db.transaction(handler).
+// session → account (is_active/banned) → permission → validate(zod) → handler.
 // No raw Server Action should bypass this — an unguarded action is a public POST.
 // Project-scoping for engineers is injected here once the projects table exists
 // (Stage 2); the hook is the `ctx` passed to the handler.
+//
+// Uses getFreshSession (DB-authoritative, bypasses the cookie cache): every
+// mutation re-validates the account + role against the DB, so deactivation and
+// role changes take effect immediately on the write path regardless of the 60s
+// read-cache window. The READ gate (AuthGate) uses the cheap cached getSession.
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
+/** Handler context for `action()` — runs inside a DB transaction. */
 export type ActionContext = { user: SessionUser; tx: Tx };
+/** Handler context for `actionNoTx()` — no ambient transaction; the handler owns
+ *  its atomicity via `ctx.db`. Use when calling Better Auth APIs (createUser, …),
+ *  which run on their OWN connection and must not be nested inside an open
+ *  transaction (a second pooled connection inside a txn can deadlock PgBouncer). */
+export type NoTxActionContext = { user: SessionUser; db: Database };
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
+/**
+ * A handler-thrown error whose message is SAFE to show the user (e.g. a domain
+ * rule: "That email is already registered."). The guards turn it into a clean
+ * `{ ok: false, error }`; any OTHER thrown error is logged and returned as a
+ * generic message so internals never leak to the client.
+ */
+export class ActionError extends Error {}
+
+// Shared session → account → permission → validate pipeline. Fails CLOSED if the
+// session read throws (e.g. DB unreachable).
+async function authorize<TInput>(
+  permission: Permission,
+  schema: z.ZodType<TInput>,
+  rawInput: unknown,
+): Promise<{ ok: true; user: SessionUser; input: TInput } | { ok: false; error: string }> {
+  let session: Awaited<ReturnType<typeof getFreshSession>>;
+  try {
+    session = await getFreshSession();
+  } catch (err) {
+    console.error(`[action:${permission}] session read failed`, err);
+    return { ok: false, error: "Not authenticated" };
+  }
+  if (!session) return { ok: false, error: "Not authenticated" };
+  if (!isAuthorized(session)) return { ok: false, error: "Account is inactive" };
+  if (!hasPermission(roleOf(session.user), permission)) return { ok: false, error: "Forbidden" };
+
+  const parsed = schema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  return { ok: true, user: session.user, input: parsed.data };
+}
+
+function toErrorResult(err: unknown, permission: Permission): { ok: false; error: string } {
+  if (err instanceof ActionError) return { ok: false, error: err.message };
+  console.error(`[action:${permission}] unexpected error`, err);
+  return { ok: false, error: "Something went wrong. Please try again." };
+}
+
+/** Guarded mutation that runs the handler inside a DB transaction. */
 export function action<TInput, TOutput>(
   permission: Permission,
   schema: z.ZodType<TInput>,
   handler: (input: TInput, ctx: ActionContext) => Promise<TOutput>,
 ): (rawInput: unknown) => Promise<ActionResult<TOutput>> {
   return async (rawInput) => {
-    const session = await getSession();
-    if (!session) return { ok: false, error: "Not authenticated" };
-
-    const sessionUser = session.user;
-    if ((sessionUser as { isActive?: boolean }).isActive === false) {
-      return { ok: false, error: "Account is inactive" };
+    const authd = await authorize(permission, schema, rawInput);
+    if (!authd.ok) return authd;
+    try {
+      const data = await db.transaction((tx) => handler(authd.input, { user: authd.user, tx }));
+      return { ok: true, data };
+    } catch (err) {
+      return toErrorResult(err, permission);
     }
-    if (!hasPermission(roleOf(sessionUser), permission)) {
-      return { ok: false, error: "Forbidden" };
-    }
+  };
+}
 
-    const parsed = schema.safeParse(rawInput);
-    if (!parsed.success) {
-      return {
-        ok: false,
-        error: parsed.error.issues[0]?.message ?? "Invalid input",
-      };
+/** Guarded mutation WITHOUT an ambient transaction — for handlers that call Better
+ *  Auth APIs. The handler manages its own atomicity via `ctx.db`. */
+export function actionNoTx<TInput, TOutput>(
+  permission: Permission,
+  schema: z.ZodType<TInput>,
+  handler: (input: TInput, ctx: NoTxActionContext) => Promise<TOutput>,
+): (rawInput: unknown) => Promise<ActionResult<TOutput>> {
+  return async (rawInput) => {
+    const authd = await authorize(permission, schema, rawInput);
+    if (!authd.ok) return authd;
+    try {
+      const data = await handler(authd.input, { user: authd.user, db });
+      return { ok: true, data };
+    } catch (err) {
+      return toErrorResult(err, permission);
     }
-
-    const data = await db.transaction((tx) => handler(parsed.data, { user: sessionUser, tx }));
-    return { ok: true, data };
   };
 }

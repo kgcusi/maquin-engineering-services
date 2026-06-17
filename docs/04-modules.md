@@ -63,29 +63,29 @@ Full detail: [12-audit-trail.md](12-audit-trail.md).
 ---
 
 ### 5.3 System Settings
-**Purpose.** Admin-editable reusable option lists + app configuration.
+**Purpose.** App configuration. (Option lists — statuses, categories, units, trades — are **fixed
+in code**, not admin-editable; see [17](17-audit-decisions.md) §9. The per-list CRUD managers are
+**dropped**.)
 
-**Key data.** Lookup tables ([02](02-data-model.md) §2.4): `project_statuses`, `task_statuses`,
-`inventory_categories`, `units`, `budget_categories`, `expense_categories`, `employee_trades`,
-`cashflow_categories`; plus `app_settings`, `notification_settings`.
+**Key data.** `app_settings`, `notification_settings` ([02](02-data-model.md) §2.4). The former
+lookup values now live in code: `src/lib/lookups.ts` (units, trades, categories) and
+`src/lib/statuses.ts` (project status + derivations).
 
-**Screens.** Settings hub → one manager per list (CRUD, reorder, activate/deactivate) ·
-Company/app settings (name, timezone, currency, logo) · Notification settings ·
-SMTP test panel.
+**Screens.** Company/app settings (name, timezone, currency, logo) · Notification settings ·
+SMTP test panel. (No lookup-list managers.)
 
 **Rules.**
-- A lookup value in use cannot be hard-deleted; it can be deactivated (hidden from new pickers,
-  preserved on historical records).
-- `code` is unique per list and immutable once referenced.
-- Seed sensible defaults so the system is usable on day one.
 - Changing currency/timezone is a guarded action (affects display across the app).
+- Adding a unit/trade/category/status is a code change (one-line const edit, no migration), not a
+  runtime admin action — by design.
 
 **Events.** `settings.updated` (optional audit only).
 
 **Permissions.** `settings.view`, `settings.manage` (Admin).
 
-**Done when.** Admin adds a new expense category and it appears in the expense form; a category
-already used by an expense cannot be deleted, only deactivated.
+**Done when.** An admin updates the firm's timezone and it takes effect across displayed
+timestamps; the settings hub exposes app/company + notification settings only (no option-list
+CRUD).
 
 ---
 
@@ -118,7 +118,7 @@ failed send is retried and surfaced — without rolling back the approval.
 ### 5.5 Employee / Workforce Directory
 **Purpose.** Reference list of people in project operations (who reported/received/worked).
 
-**Key data.** `employees`, `employee_trades`.
+**Key data.** `employees` (trade via the fixed `trade_code`, `src/lib/lookups.ts`).
 
 **Screens.** Employee list (search/filter by trade/status) · Create/edit · Employee detail
 (appearances in DSR manpower, receipts).
@@ -181,8 +181,9 @@ Documents).
 - Assigning `lead_engineer_id` is what grants the engineer access (scoping rule, [03](03-roles-and-permissions.md) §4).
 - `progress_pct` either rolls up from tasks (recommended) or is set manually — choose one and
   be consistent; document it on the project.
-- Status transitions follow the configured `project_statuses`; setting `Completed` requires an
-  `actual_end_date`.
+- Status transitions follow the fixed `projects.status` enum (`PLANNING`/`ACTIVE`/`ON_HOLD`/
+  `COMPLETED`/`CANCELLED`, [17](17-audit-decisions.md) §9); setting `COMPLETED` requires an
+  `actual_end_date`. Warranty/retention is the derived `defects_liability_until`, not a status.
 - Contract amount and budget are distinct (contract = client price; budget = planned cost).
 
 **Events.** `project.created`, `project.status_changed`, `project.completed`.
@@ -284,7 +285,7 @@ budget-vs-actual and updates the project's actual cost and dashboard.
 **Purpose.** Track money in (client payments, billings) and out (suppliers, rentals,
 subcontractors).
 
-**Key data.** `cashflow_tx`, `cashflow_categories`.
+**Key data.** `cashflow_tx` (category via the fixed `category_code`, `src/lib/lookups.ts`).
 
 **Screens.** Cash flow ledger per project (and firm-wide) · Add inflow/outflow · Cash position
 summary (in − out, running balance).
@@ -341,7 +342,8 @@ Full state machine: [05-core-flows.md](05-core-flows.md) §5.
 ### 5.14 Inventory Master Data
 **Purpose.** Items and locations.
 
-**Key data.** `items`, `locations`, `inventory_categories`, `units`.
+**Key data.** `items`, `locations` (category/unit via the fixed `category_code`/`unit_code`,
+`src/lib/lookups.ts`).
 
 **Screens.** Items list (category, unit, on-hand, reorder level) · Create/edit item ·
 Locations list/edit.

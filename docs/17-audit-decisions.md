@@ -71,7 +71,7 @@ Two roles retained (Admin, Engineer). To remove the single-admin bottleneck with
 | **DSR material usage** | **Option A** — post `−USAGE` ledger rows on DSR submit. Add line-level linkage (`dsr_materials.id` carried on the ledger source, or a `ledger_entry_id` back-ref) so editing a submitted DSR reverses the exact rows. No per-project toggle. |
 | **Sites as locations** | **Yes, non-optional.** Creating a project auto-creates its `SITE` location. RELEASE/RECEIPT/USAGE/RETURN carry `project_id`. Drop all "(if tracked)" hedges. |
 | **API style** | **Server Actions for all mutations** (one `action()` guard → service → transaction). Route handlers only for: file signed-URLs, cron endpoints, the Resend webhook, and report-export downloads. `11-api-design` is re-read as "service operations + the few real HTTP routes." |
-| **Phase statuses** | Own `phase_statuses` lookup (not shared with `task_statuses`). |
+| **Phase statuses** | ~~Own `phase_statuses` lookup~~ — **superseded by §9**: phase status is *derived* from rolled-up progress, not stored. |
 | **Better Auth ↔ users** | Better Auth owns `user`/`session`/`account`/`verification` (canonical for auth). Extend `user` with `role`, `is_active`, `employee_id`. **Remove `password_hash` from the domain user table** (it lives in `account`). Domain FKs reference the Better Auth user id. `is_active=false` enforced via a session check + the admin `ban` plugin (Better Auth doesn't auto-revoke on a flag flip). Settle table naming (configure plural, or document `user`/`account` as an exception to the plural rule). |
 
 ---
@@ -177,3 +177,84 @@ Surface these when building the relevant feature:
 - **Currency / timezone** (defaulted `PHP` / `Asia/Manila`).
 - **DSR same-day edit window** length.
 - **Better Auth** table naming convention (plural override vs documented exception).
+
+---
+
+## 9. Fixed lookups — statuses / categories / units / trades are code-owned (supersedes the lookup tables)
+
+The stakeholder confirmed these values don't need per-firm customization, so the
+**admin-editable System Settings lookup tables are dropped** in favor of **fixed, code-owned
+values**. This **supersedes** `02 §2.4` (the lookup-tables block), `00 §7` (the enums-vs-lookup
+paragraph), `04 §5.3` (the per-list CRUD managers), and the `*_id` FK rows that pointed at these
+tables. Done now (low-risk: the domain schema isn't built yet, so **nothing is dropped from the
+DB** — the not-yet-written schema is authored directly in the fixed shape).
+
+**Why it's not uniform.** "Status" had conflated three different things; each gets the right
+mechanism:
+
+| Bucket | What | Mechanism | Lives in |
+|--------|------|-----------|----------|
+| **State machine** | code branches on it; stored | Postgres **`pgEnum`** (DB-enforced) | schema + `src/lib/statuses.ts` (value tuple, single-sourced) |
+| **Descriptive label** | code never branches on it; just attached + displayed | **TS const map + plain `text` code column** (no table, no FK, no join) | `src/lib/lookups.ts` |
+| **Derived** | a roll-up; shouldn't be stored | computed in queries/services | `src/lib/statuses.ts` |
+
+Adding a unit/trade/category is now a **one-line edit** to the const — **no migration** (the
+column is plain `text` validated by Zod against the const, inside the `action()` wrapper).
+
+### Group A — the former lookup statuses
+
+- **Project** (`pgEnum projects.status`, manual lifecycle): `PLANNING → ACTIVE ⇄ ON_HOLD →
+  COMPLETED`; any → `CANCELLED`. **Not derived** — completion is a human sign-off (sets
+  `actual_end_date`). **Warranty/retention are facts, not states:** add `projects.
+  defects_liability_until date N`; an **"In Warranty"** badge is *derived* (`status = COMPLETED
+  AND today ≤ defects_liability_until`, mirroring `is_delayed`). Defects → `notes`; retention
+  release → a **cashflow category** (`RETENTION_RELEASE`), never a project field.
+- **Task** (status **derived, not stored**): the engineer reports `progress_pct` (the single
+  input at the leaf); status = `0 → Not Started`, `1–99 → In Progress`, `100 → Done` (sets
+  `completed_date`). Orthogonal overlays: `is_blocked boolean` + `blocked_reason text N`, and
+  `is_delayed` (derived from `due_date`). **UI:** the progress editor must show the
+  remaining/total context so entry is informed.
+- **Phase** (status **derived, not stored**): `progress_pct` = weighted avg of its tasks (§3);
+  same 3-state mapping as tasks; `is_delayed` from `target_end_date`. The §3 "own
+  `phase_statuses` lookup" line is **moot** (it solved an admin-editing problem we no longer
+  have).
+
+### Group B — workflow enums (all `pgEnum`; pin these spellings before the first migration)
+
+`approvals.status` is the **single source of truth for the decision**
+(`PENDING/APPROVED/REJECTED/CANCELLED`). `expenses.status` and `material_requests.status` are a
+**denormalized projection** of the outcome, written **only** in the approval-resolution
+transaction (`05 §5`); the MR projection extends past the gate for `PARTIALLY_RELEASED/
+RELEASED`. Single writer ⇒ no drift; keeps "only APPROVED counts" a column filter (no join).
+
+Pinned value sets: `budgets` `(DRAFT,ACTIVE,SUPERSEDED)` · `daily_reports` `(DRAFT,SUBMITTED)` ·
+`expenses.payment_status` `(UNPAID,PARTIAL,PAID)` · `expenses.status` `(PENDING,APPROVED,
+REJECTED)` · `material_requests` `(DRAFT,PENDING,APPROVED,PARTIALLY_RELEASED,RELEASED,REJECTED,
+CANCELLED)` · `releases` `(RELEASED,RECEIVED,DISCREPANCY)` · `inventory_movements`
+`(PENDING,POSTED,REJECTED)` · `notifications` `(QUEUED,SENT,DELIVERED,BOUNCED,COMPLAINED,FAILED,
+READ)`. The already-enum non-status sets are unchanged (`approvals.type` incl. `WASTE`,
+`cashflow_tx.direction/method`, `locations.type`, `stock_ledger.movement_type`,
+`dsr_issues.severity`, …). Apply the §5 `ADJUSTMENT` vs `INVENTORY_ADJUSTMENT` reconciliation and
+implement `site_receipts` via the §6 neutral shortage **reason picker** rather than a stored
+`OK/SHORT/OVER/DAMAGED` enum.
+
+- **`employees.status (ACTIVE/INACTIVE)` collapses to `is_active boolean`** (it was a boolean in
+  enum costume; matches `users.is_active`).
+
+### Descriptive label sets (TS const + `text` code column) — see `src/lib/lookups.ts`
+
+- **Units** (`items.unit_code`, `*_line.unit_code`, `dsr_materials.unit_code`): a focused
+  construction set (~27), not the full UN/CEFACT catalogue.
+- **Trades** (`employees.trade_code`, `dsr_manpower.trade_code`): PH-construction default set.
+- **Cost categories** — **`budget_categories` + `expense_categories` unify into ONE set**
+  (`budget_lines.category_code`, `expenses.category_code`) so budget-vs-actual reconciles on a
+  single vocabulary.
+- **Cash-flow categories** (`cashflow_tx.category_code`) and **inventory categories**
+  (`items.category_code`) stay distinct (different axes).
+
+### Dropped / kept
+
+- **Dropped:** the `04 §5.3` per-list CRUD managers and the deactivate-not-delete / immutable-
+  `code` machinery. **Kept:** `app_settings` (timezone, currency, company info) and
+  `notification_settings` — those remain admin-editable.
+

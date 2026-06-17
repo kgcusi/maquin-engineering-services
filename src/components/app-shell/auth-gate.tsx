@@ -1,12 +1,13 @@
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/session";
+import { getSession, isAuthorized } from "@/lib/session";
 
 // Server-side authentication gate. Reads the session (dynamic — cookies/headers),
 // so every consumer must render it inside a <Suspense> boundary (Cache
 // Components rule). Fails CLOSED: any error (e.g. DB unreachable) is treated as
-// unauthenticated. Inactive accounts are denied (docs/17 §3). Authorization
-// (RBAC + project scope) layers on top of this in Stage 1 (src/lib/rbac.ts).
+// unauthenticated. Uses the shared `isAuthorized` predicate — the same one the
+// login page negates to bounce signed-in users — so they can never disagree and
+// loop. Authorization (RBAC + project scope) layers on top of this.
 export async function AuthGate({ children }: { children: React.ReactNode }) {
   let session: Awaited<ReturnType<typeof getSession>> = null;
 
@@ -16,8 +17,7 @@ export async function AuthGate({ children }: { children: React.ReactNode }) {
     session = null;
   }
 
-  const user = session?.user as { isActive?: boolean } | undefined;
-  if (!session || user?.isActive === false) {
+  if (!isAuthorized(session)) {
     redirect("/login");
   }
 

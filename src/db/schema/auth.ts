@@ -18,6 +18,12 @@ export const user = pgTable("user", {
   banExpires: timestamp("ban_expires"),
   isActive: boolean("is_active").default(true),
   employeeId: text("employee_id"),
+  // Domain-only soft-delete marker (users with history are archived, not removed).
+  // Deliberately NOT a Better Auth additionalField: Better Auth never reads it, and
+  // keeping it out of the session cookie avoids bloat. Lockout for archived users is
+  // handled the same way as deactivation (isActive=false + session revocation).
+  // Every user listing filters on this via visibleUserWhere() (src/lib/rbac.ts).
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const session = pgTable(

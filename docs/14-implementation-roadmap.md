@@ -40,8 +40,9 @@ Directory (5.5–5.7).
       management (admin), deactivate.
 - [ ] **Audit trail:** `audit()` helper wired into the service layer; global viewer + per-entity
       history panel component.
-- [ ] **System settings:** lookup-table managers (statuses, categories, units, trades, cashflow
-      categories), app settings, seeded defaults.
+- [ ] **System settings:** app/company settings + notification settings only. Option lists
+      (statuses, categories, units, trades) are **fixed in code** — no lookup-table managers
+      ([17](17-audit-decisions.md) §9); ship `src/lib/lookups.ts` + `src/lib/statuses.ts`.
 - [ ] **Notifications scaffold:** event bus, dispatcher, `notifications` table, Resend mailer +
       React Email + test panel, outbox + **Vercel Cron drain**, notification settings UI.
       (Specific events wired as their modules land.)

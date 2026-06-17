@@ -97,22 +97,15 @@ Optional but recommended so roles can grow beyond the two enums.
 | ip / user_agent | string **N** | request context |
 | created_at | timestamp **idx** | |
 
-### 2.4 System Settings lookup tables
-Admin-editable option lists. Each follows the same shape:
+### 2.4 System Settings
 
-`(id, name, code U, sort_order, is_active, color N, created_at, updated_at)`
+> **Option lists are fixed in code, not lookup tables** ([17](17-audit-decisions.md) §9, which
+> supersedes the prior `*_statuses` / `units` / `*_categories` / `employee_trades` tables). State
+> machines code branches on are `pgEnum`; descriptive labels (units, trades, categories) are TS
+> const maps + a `text` code column (`src/lib/lookups.ts`); task/phase status is derived from
+> progress (`src/lib/statuses.ts`). There are **no** `*_id` FKs into option-list tables.
 
-Lookup tables:
-- `project_statuses` (e.g. Planning, Active, On Hold, Completed, Cancelled)
-- `task_statuses` (e.g. Not Started, In Progress, Blocked, Done)
-- `inventory_categories`
-- `units` (unit of measure: pcs, kg, m, m³, bag, set …)
-- `budget_categories`
-- `expense_categories`
-- `employee_trades` (Mason, Electrician, Foreman …)
-- `cashflow_categories` (Client Payment, Supplier Payment, Equipment Rental …)
-
-Plus a single-row-ish settings store:
+Admin-editable configuration store (the only settings that stay editable at runtime):
 - `app_settings(key U, value jsonb)` — timezone, currency, company info, SMTP defaults toggle,
   reorder behavior, etc.
 - `notification_settings` — see [08](08-notifications.md).
@@ -127,9 +120,9 @@ Plus a single-row-ish settings store:
 |-------|------|-------|
 | id | uuid **PK** | |
 | full_name | string **idx** | |
-| trade_id | uuid **FK→employee_trades** **N** | |
+| trade_code | text **N** | `TRADES` (`src/lib/lookups.ts`); no FK |
 | phone / email | string **N** | |
-| status | enum(`ACTIVE`,`INACTIVE`) | |
+| is_active | boolean | inactive = no longer on the directory ([17](17-audit-decisions.md) §9) |
 | notes | text **N** | |
 | created_at / updated_at / deleted_at | | |
 
@@ -179,8 +172,9 @@ Project history is derived (projects where `client_id` matches).
 | actual_end_date | date **N** | set on completion |
 | scope_of_work | text **N** | |
 | lead_engineer_id | uuid **FK→users** **idx** | the assigned engineer |
-| status_id | uuid **FK→project_statuses** **idx** | |
-| progress_pct | decimal(5,2) | 0–100; derived from tasks or set manually |
+| status | enum(`PLANNING`,`ACTIVE`,`ON_HOLD`,`COMPLETED`,`CANCELLED`) **idx** | `pgEnum`; manual lifecycle ([17](17-audit-decisions.md) §9) |
+| defects_liability_until | date **N** | warranty/retention period end; "In Warranty" is derived, not stored |
+| progress_pct | decimal(5,2) | 0–100; derived from phases (or pinned via `progress_is_manual`) |
 | created_by | uuid **FK→users** | |
 | created_at / updated_at / deleted_at | | |
 
@@ -197,9 +191,11 @@ per project later; v1 may rely on `lead_engineer_id` only.
 | name | string | |
 | sequence | int | ordering |
 | start_date / target_end_date | date **N** | |
-| status_id | uuid **FK→task_statuses** | reuse task statuses or own enum |
-| progress_pct | decimal(5,2) | derived from tasks |
+| progress_pct | decimal(5,2) | derived: weighted avg of tasks |
 | remarks | text **N** | |
+
+> Status is **derived, not stored** ([17](17-audit-decisions.md) §9): `deriveProgressStatus`
+> (0 → Not Started, 1–99 → In Progress, 100 → Done); `is_delayed` derived from `target_end_date`.
 
 ### 4.3 `tasks`
 
@@ -210,11 +206,15 @@ per project later; v1 may rely on `lead_engineer_id` only.
 | name | string | |
 | assignee_id | uuid **FK→users** **N** | |
 | start_date / due_date | date **N** | |
-| completed_date | date **N** | |
-| status_id | uuid **FK→task_statuses** **idx** | |
-| progress_pct | decimal(5,2) | |
+| completed_date | date **N** | set when progress_pct hits 100 |
+| progress_pct | decimal(5,2) | **the single input** (status derives from it) |
+| is_blocked | boolean | orthogonal overlay, not a status |
+| blocked_reason | text **N** | required when `is_blocked` |
 | is_delayed | boolean | derived: due_date < today and not done |
 | remarks | text **N** | |
+
+> Status is **derived, not stored** ([17](17-audit-decisions.md) §9): `deriveProgressStatus`
+> (0 → Not Started, 1–99 → In Progress, 100 → Done). Blocked/Delayed are flags shown alongside.
 
 Children: `task_attachments(id, task_id FK, file_id FK, created_at)`.
 
@@ -236,9 +236,9 @@ Children: `task_attachments(id, task_id FK, file_id FK, created_at)`.
 | status | enum(`DRAFT`,`SUBMITTED`) | |
 
 Children:
-- `dsr_manpower(id, daily_report_id FK, employee_id FK N, trade_id FK N, headcount int, hours decimal N)`
+- `dsr_manpower(id, daily_report_id FK, employee_id FK N, trade_code text N, headcount int, hours decimal N)`
 - `dsr_equipment(id, daily_report_id FK, name, quantity, hours decimal N, remarks N)`
-- `dsr_materials(id, daily_report_id FK, item_id FK N, description N, quantity decimal, unit_id FK N)` — **drives "used" in issued/used/remaining**
+- `dsr_materials(id, daily_report_id FK, item_id FK N, description N, quantity decimal, unit_code text N)` — **drives "used" in issued/used/remaining**
 - `dsr_photos(id, daily_report_id FK, file_id FK, caption N)`
 - `dsr_issues(id, daily_report_id FK, description, severity enum, resolved boolean)`
 
@@ -268,7 +268,7 @@ One active budget per project (versioned via `version`).
 |-------|------|-------|
 | id | uuid **PK** | |
 | budget_id | uuid **FK→budgets** **idx** | |
-| category_id | uuid **FK→budget_categories** | |
+| category_code | text | `COST_CATEGORIES` (shared with expenses; [17](17-audit-decisions.md) §9) |
 | description | string **N** | |
 | planned_amount | money | |
 
@@ -279,7 +279,7 @@ One active budget per project (versioned via `version`).
 | id | uuid **PK** | |
 | ref_code | string **U** | `EXP-2026-00301` |
 | project_id | uuid **FK→projects** **idx** | |
-| category_id | uuid **FK→expense_categories** **idx** | |
+| category_code | text **idx** | `COST_CATEGORIES` (shared with budget lines) |
 | budget_line_id | uuid **FK→budget_lines** **N** | ties actual to planned |
 | supplier_id | uuid **FK→suppliers** **N** | |
 | description | string | |
@@ -300,7 +300,7 @@ Children: `expense_attachments(id, expense_id FK, file_id FK, kind enum('RECEIPT
 | ref_code | string **U** | `CF-2026-00114` |
 | project_id | uuid **FK→projects** **idx** **N** | N for firm-level entries |
 | direction | enum(`IN`,`OUT`) **idx** | money in / out |
-| category_id | uuid **FK→cashflow_categories** | |
+| category_code | text | `CASHFLOW_CATEGORIES` (incl. `RETENTION_RELEASE`) |
 | supplier_id / client_id | uuid **FK** **N** | counterparty |
 | description | string | |
 | amount | money | always positive; sign comes from `direction` |
@@ -346,8 +346,8 @@ A single polymorphic approvals table gates many transaction types.
 | id | uuid **PK** | |
 | sku | string **U** **N** | optional internal code |
 | name | string **idx** | |
-| category_id | uuid **FK→inventory_categories** **idx** | |
-| unit_id | uuid **FK→units** | base unit of measure |
+| category_code | text **idx** | `INVENTORY_CATEGORIES` (`src/lib/lookups.ts`); no FK |
+| unit_code | text | base unit of measure — `UNITS` |
 | reorder_level | decimal(14,3) | low-stock threshold |
 | default_cost | money **N** | for valuation/estimates |
 | preferred_supplier_id | uuid **FK→suppliers** **N** | |
@@ -367,19 +367,19 @@ A single polymorphic approvals table gates many transaction types.
 ### 7.3 `stock_ins` + `stock_in_lines`
 `stock_ins(id, ref_code U 'SI-2026-00118', supplier_id FK N, location_id FK, received_by FK, received_at, invoice_no N, file_id FK N, notes N)`
 
-`stock_in_lines(id, stock_in_id FK, item_id FK, quantity decimal, unit_cost money, unit_id FK)`
+`stock_in_lines(id, stock_in_id FK, item_id FK, quantity decimal, unit_cost money, unit_code text)`
 
 > Posting a stock-in writes one **positive** `stock_ledger` row per line. See [06](06-inventory-ledger.md).
 
 ### 7.4 `material_requests` + `mr_lines`
 `material_requests(id, ref_code U 'MR-2026-00042', project_id FK, requested_by FK, needed_date date N, purpose text, status enum(DRAFT,PENDING,APPROVED,PARTIALLY_RELEASED,RELEASED,REJECTED,CANCELLED), approval_id FK N, created_at)`
 
-`mr_lines(id, material_request_id FK, item_id FK, qty_requested decimal, qty_approved decimal N, qty_released decimal default 0, unit_id FK, note N)`
+`mr_lines(id, material_request_id FK, item_id FK, qty_requested decimal, qty_approved decimal N, qty_released decimal default 0, unit_code text, note N)`
 
 ### 7.5 `releases` + `release_lines` + `site_receipts`
 `releases(id, ref_code U 'REL-2026-00077', material_request_id FK, from_location_id FK, released_by FK, released_at, status enum(RELEASED,RECEIVED,DISCREPANCY), notes N)`
 
-`release_lines(id, release_id FK, mr_line_id FK, item_id FK, qty_released decimal, unit_id FK)`
+`release_lines(id, release_id FK, mr_line_id FK, item_id FK, qty_released decimal, unit_code text)`
 
 `site_receipts(id, release_id FK, received_by FK, received_at, status enum(OK,SHORT,OVER,DAMAGED), notes N, file_id FK N)`
 with `site_receipt_lines(id, site_receipt_id FK, release_line_id FK, qty_received decimal, shortage_qty decimal, remark N)`
