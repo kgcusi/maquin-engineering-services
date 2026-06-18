@@ -42,7 +42,7 @@ type Props = {
 export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
   const editing = Boolean(supplier);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "Edit supplier" : "New supplier"}</DialogTitle>
@@ -165,7 +165,7 @@ function SupplierForm({ supplier, onDone }: { supplier: SupplierRow | null; onDo
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
+        <Label htmlFor="notes">Remarks</Label>
         <Textarea id="notes" rows={3} disabled={isPending} {...register("notes")} />
         <FieldError message={errors.notes?.message} />
       </div>

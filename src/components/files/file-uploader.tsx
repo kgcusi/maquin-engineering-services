@@ -6,13 +6,7 @@ import { Loader2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useProgressTransition } from "@/hooks/use-progress-transition";
 import { formatBytes, isAllowedMime, MAX_UPLOAD_BYTES, UPLOAD_ACCEPT } from "@/lib/uploads";
 
@@ -20,27 +14,23 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
 // Consumer-agnostic uploader: the parent binds the entity (e.g. clientId) into the
 // two server actions. Flow: presign → direct browser PUT to R2 → confirm. Controls
-// disable while in flight (no double-submit). When `kinds` is provided, a required
-// document-type picker is shown and its value is passed to confirm (employees use
-// this; clients don't).
+// disable while in flight (no double-submit). An optional free-form name is passed
+// to confirm; left blank, the document is labelled by its own file name.
 type Props = {
   onRequestUrl: (meta: {
     filename: string;
     mime: string;
     size: number;
   }) => Promise<Result<{ fileId: string; url: string }>>;
-  onConfirm: (fileId: string, kind?: string) => Promise<Result<unknown>>;
-  kinds?: readonly string[];
+  onConfirm: (fileId: string, name?: string) => Promise<Result<unknown>>;
 };
 
-export function FileUploader({ onRequestUrl, onConfirm, kinds }: Props) {
+export function FileUploader({ onRequestUrl, onConfirm }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [kind, setKind] = useState("");
+  const [name, setName] = useState("");
   const [isPending, start] = useProgressTransition();
-
-  const needsKind = Boolean(kinds && kinds.length > 0);
 
   function pick(next: File | null) {
     if (next && !isAllowedMime(next.type)) {
@@ -56,14 +46,14 @@ export function FileUploader({ onRequestUrl, onConfirm, kinds }: Props) {
 
   function reset() {
     setFile(null);
-    setKind("");
+    setName("");
     if (inputRef.current) inputRef.current.value = "";
   }
 
   function upload() {
-    if (!file || (needsKind && !kind)) return;
+    if (!file) return;
     const current = file;
-    const currentKind = kind;
+    const currentName = name.trim();
     start(async () => {
       const presigned = await onRequestUrl({
         filename: current.name,
@@ -86,7 +76,7 @@ export function FileUploader({ onRequestUrl, onConfirm, kinds }: Props) {
         toast.error("Upload failed. Please try again.");
         return;
       }
-      const confirmed = await onConfirm(presigned.data.fileId, currentKind || undefined);
+      const confirmed = await onConfirm(presigned.data.fileId, currentName || undefined);
       if (!confirmed.ok) {
         toast.error(confirmed.error);
         return;
@@ -99,23 +89,17 @@ export function FileUploader({ onRequestUrl, onConfirm, kinds }: Props) {
 
   return (
     <div className="space-y-3 rounded-lg border border-dashed p-4">
-      {needsKind ? (
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground w-12 shrink-0 text-xs">Type</span>
-          <Select value={kind} onValueChange={(v) => setKind(v ?? "")} disabled={isPending}>
-            <SelectTrigger className="h-8 w-56">
-              <SelectValue placeholder="Select a document type" />
-            </SelectTrigger>
-            <SelectContent>
-              {kinds!.map((k) => (
-                <SelectItem key={k} value={k}>
-                  {k}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground w-12 shrink-0 text-xs">Name</span>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={isPending}
+          maxLength={120}
+          placeholder="Optional — we'll use the file name if left blank"
+          className="h-8"
+        />
+      </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <input
@@ -158,12 +142,7 @@ export function FileUploader({ onRequestUrl, onConfirm, kinds }: Props) {
           >
             Choose file
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={upload}
-            disabled={!file || isPending || (needsKind && !kind)}
-          >
+          <Button type="button" size="sm" onClick={upload} disabled={!file || isPending}>
             {isPending ? (
               <>
                 <Loader2 className="size-4 animate-spin" /> Uploading…

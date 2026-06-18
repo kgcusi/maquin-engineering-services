@@ -1,9 +1,17 @@
-import { asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, isNotNull, isNull } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/employees";
 import { listAttachments } from "@/modules/files/service";
 import { listNotes } from "@/modules/notes/service";
+import {
+  offsetFor,
+  PAGE_SIZE,
+  PANEL_PAGE_SIZE,
+  searchClause,
+  type DirectoryListParams,
+  type Paginated,
+} from "@/modules/shared/list-params";
 
 export type EmployeeRow = {
   id: string;
@@ -46,19 +54,47 @@ const toRow = (r: RawRow): EmployeeRow => ({
   rate: r.rate ? r.rate.toDecimalString() : null,
 });
 
-// Active employees only (soft-deleted are hidden). Newest first.
-export async function listEmployees(): Promise<EmployeeRow[]> {
-  const rows = await db
-    .select(COLUMNS)
-    .from(employees)
-    .where(isNull(employees.deletedAt))
-    .orderBy(desc(employees.createdAt));
-  return rows.map(toRow);
+// Active employees only (soft-deleted are hidden), newest first, one page at a
+// time with an optional name/position/contact search. Sibling COUNT(*) powers
+// the numbered footer.
+export async function listEmployees(params: DirectoryListParams): Promise<Paginated<EmployeeRow>> {
+  const where = and(
+    isNull(employees.deletedAt),
+    searchClause(params.q, [
+      employees.fullName,
+      employees.position,
+      employees.email,
+      employees.phone,
+    ]),
+  );
+
+  const [rows, [{ value: total }]] = await Promise.all([
+    db
+      .select(COLUMNS)
+      .from(employees)
+      .where(where)
+      .orderBy(desc(employees.createdAt))
+      .limit(PAGE_SIZE)
+      .offset(offsetFor(params.page, PAGE_SIZE)),
+    db.select({ value: count() }).from(employees).where(where),
+  ]);
+
+  return { rows: rows.map(toRow), total, page: params.page, pageSize: PAGE_SIZE };
 }
 
 export async function getEmployeeById(id: string): Promise<EmployeeRow | null> {
   const [row] = await db.select(COLUMNS).from(employees).where(eq(employees.id, id)).limit(1);
   return row ? toRow(row) : null;
+}
+
+// All active employee names — feeds the import dialog's duplicate warning, which
+// must compare against every existing employee, not just the current page.
+export async function listEmployeeNames(): Promise<string[]> {
+  const rows = await db
+    .select({ fullName: employees.fullName })
+    .from(employees)
+    .where(isNull(employees.deletedAt));
+  return rows.map((r) => r.fullName);
 }
 
 // Distinct existing positions — feeds the creatable Position picker.
@@ -72,5 +108,7 @@ export async function listEmployeePositions(): Promise<string[]> {
 }
 
 export const EMPLOYEE_ENTITY = "employee" as const;
-export const getEmployeeDocuments = (id: string) => listAttachments(db, EMPLOYEE_ENTITY, id);
-export const getEmployeeNotes = (id: string) => listNotes(db, EMPLOYEE_ENTITY, id);
+export const getEmployeeDocuments = (id: string, page: number) =>
+  listAttachments(db, EMPLOYEE_ENTITY, id, page, PANEL_PAGE_SIZE);
+export const getEmployeeNotes = (id: string, page: number) =>
+  listNotes(db, EMPLOYEE_ENTITY, id, page, PANEL_PAGE_SIZE);

@@ -5,11 +5,14 @@ import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { SuppliersTable } from "@/components/suppliers/suppliers-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getSettings } from "@/modules/settings/queries";
-import { listSuppliers } from "@/modules/suppliers/queries";
+import { directoryListSchema } from "@/modules/shared/list-params";
+import { listSupplierNames, listSuppliers } from "@/modules/suppliers/queries";
 
 export const metadata: Metadata = { title: "Suppliers" };
 
-export default async function SuppliersPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function SuppliersPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePagePermission("supplier.view");
 
   return (
@@ -22,13 +25,28 @@ export default async function SuppliersPage() {
       </header>
 
       <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
-        <SuppliersSection />
+        <SuppliersSection searchParams={searchParams} />
       </Suspense>
     </div>
   );
 }
 
-async function SuppliersSection() {
-  const [suppliers, settings] = await Promise.all([listSuppliers(), getSettings()]);
-  return <SuppliersTable suppliers={suppliers} timeZone={settings.timezone} />;
+async function SuppliersSection({ searchParams }: { searchParams: SearchParams }) {
+  const params = directoryListSchema.parse(await searchParams);
+  const [result, existingNames, settings] = await Promise.all([
+    listSuppliers(params),
+    listSupplierNames(),
+    getSettings(),
+  ]);
+
+  return (
+    <SuppliersTable
+      rows={result.rows}
+      total={result.total}
+      page={result.page}
+      pageSize={result.pageSize}
+      existingNames={existingNames}
+      timeZone={settings.timezone}
+    />
+  );
 }

@@ -4,12 +4,15 @@ import type { Metadata } from "next";
 import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { ClientsTable } from "@/components/clients/clients-table";
 import { requirePagePermission } from "@/lib/page-guards";
-import { listClients } from "@/modules/clients/queries";
+import { listClientNames, listClients } from "@/modules/clients/queries";
 import { getSettings } from "@/modules/settings/queries";
+import { directoryListSchema } from "@/modules/shared/list-params";
 
 export const metadata: Metadata = { title: "Clients" };
 
-export default async function ClientsPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function ClientsPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePagePermission("client.view");
 
   return (
@@ -22,13 +25,28 @@ export default async function ClientsPage() {
       </header>
 
       <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
-        <ClientsSection />
+        <ClientsSection searchParams={searchParams} />
       </Suspense>
     </div>
   );
 }
 
-async function ClientsSection() {
-  const [clients, settings] = await Promise.all([listClients(), getSettings()]);
-  return <ClientsTable clients={clients} timeZone={settings.timezone} />;
+async function ClientsSection({ searchParams }: { searchParams: SearchParams }) {
+  const params = directoryListSchema.parse(await searchParams);
+  const [result, existingNames, settings] = await Promise.all([
+    listClients(params),
+    listClientNames(),
+    getSettings(),
+  ]);
+
+  return (
+    <ClientsTable
+      rows={result.rows}
+      total={result.total}
+      page={result.page}
+      pageSize={result.pageSize}
+      existingNames={existingNames}
+      timeZone={settings.timezone}
+    />
+  );
 }

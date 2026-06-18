@@ -36,6 +36,43 @@ export const updateUserSchema = z.object({
   role: roleField,
 });
 
+// Admin-initiated reset of ANOTHER user's password — no current password, since
+// the admin doesn't know it (that's the point). Accountability comes from the
+// audit trail, not re-authentication. The matching guard + Better Auth credential
+// write live in actions.ts (resetUserPasswordAction).
+export const resetUserPasswordSchema = z
+  .object({
+    id: z.string().min(1),
+    newPassword: passwordField,
+    confirmPassword: z.string().min(1, "Confirm the password"),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "Passwords don't match",
+    path: ["confirmPassword"],
+  });
+
+// The Edit-user form bundles identity fields with an OPTIONAL password reset:
+// both blank → password untouched; either filled → validated like a reset. The
+// form splits into updateUserSchema + resetUserPasswordSchema on submit.
+export const editUserFormSchema = z
+  .object({
+    id: z.string().min(1),
+    name: nameField,
+    email: emailField,
+    role: roleField,
+    newPassword: z.string(),
+    confirmPassword: z.string(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.newPassword && !data.confirmPassword) return;
+    if (data.newPassword.length < 8) {
+      ctx.addIssue({ code: "custom", message: "Use at least 8 characters", path: ["newPassword"] });
+    }
+    if (data.newPassword !== data.confirmPassword) {
+      ctx.addIssue({ code: "custom", message: "Passwords don't match", path: ["confirmPassword"] });
+    }
+  });
+
 export const userIdSchema = z.object({ id: z.string().min(1) });
 
 // Self-service password change (the account dialog). currentPassword is required
@@ -57,4 +94,6 @@ export const changePasswordSchema = z
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type ResetUserPasswordInput = z.infer<typeof resetUserPasswordSchema>;
+export type EditUserFormInput = z.infer<typeof editUserFormSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

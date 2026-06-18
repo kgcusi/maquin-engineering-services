@@ -1,10 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import type { Route } from "next";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Pencil, Plus, Search, Trash2, Truck } from "lucide-react";
+import { Eye, MoreHorizontal, Pencil, Plus, Trash2, Truck, Upload } from "lucide-react";
+import { Link } from "react-transition-progress/next";
 
 import { DeleteConfirm } from "@/components/directory/delete-confirm";
+import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
+import { DirectoryEmptyState } from "@/components/directory/empty-state";
+import { ImportDialog } from "@/components/directory/import-dialog";
+import { TablePagination } from "@/components/directory/table-pagination";
+import { useListQuery } from "@/components/directory/use-list-query";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,7 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -22,7 +28,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
-import { deleteSupplierAction } from "@/modules/suppliers/actions";
+import { bulkCreateSuppliersAction, deleteSupplierAction } from "@/modules/suppliers/actions";
+import { supplierImportDescriptor } from "@/modules/suppliers/import";
 import type { SupplierRow } from "@/modules/suppliers/queries";
 
 import { SupplierFormDialog } from "./supplier-form-dialog";
@@ -39,7 +46,14 @@ const columns: ColumnDef<SupplierRow>[] = [
   {
     accessorKey: "name",
     header: "Name",
-    cell: ({ row }) => <span className="font-medium">{row.original.name}</span>,
+    cell: ({ row }) => (
+      <Link
+        href={`/suppliers/${row.original.id}` as Route}
+        className="hover:text-primary font-medium underline-offset-4 hover:underline"
+      >
+        {row.original.name}
+      </Link>
+    ),
   },
   {
     accessorKey: "contactPerson",
@@ -86,6 +100,10 @@ const columns: ColumnDef<SupplierRow>[] = [
               <MoreHorizontal />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem render={<Link href={`/suppliers/${supplier.id}` as Route} />}>
+                <Eye />
+                View details
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => meta.onEdit(supplier)}>
                 <Pencil />
                 Edit
@@ -103,27 +121,28 @@ const columns: ColumnDef<SupplierRow>[] = [
 ];
 
 export function SuppliersTable({
-  suppliers,
+  rows,
+  total,
+  page,
+  pageSize,
+  existingNames,
   timeZone,
 }: {
-  suppliers: SupplierRow[];
+  rows: SupplierRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  existingNames: string[];
   timeZone: string;
 }) {
   const [form, setForm] = useState<FormState>(null);
   const [deleteTarget, setDeleteTarget] = useState<SupplierRow | null>(null);
-  const [query, setQuery] = useState("");
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return suppliers;
-    return suppliers.filter((s) =>
-      [s.name, s.contactPerson, s.email].some((v) => v?.toLowerCase().includes(q)),
-    );
-  }, [suppliers, query]);
+  const [importOpen, setImportOpen] = useState(false);
+  const { q, clearSearch } = useListQuery();
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: filtered,
+    data: rows,
     columns,
     getCoreRowModel: getCoreRowModel(),
     meta: {
@@ -135,78 +154,87 @@ export function SuppliersTable({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-xs">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name, contact, email"
-            className="pl-8"
-            aria-label="Search suppliers"
-          />
-        </div>
-        <Button onClick={() => setForm({ mode: "create" })}>
-          <Plus />
-          New supplier
-        </Button>
-      </div>
-
-      {suppliers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
-          <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
-            <Truck className="size-5" />
-          </span>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">No suppliers yet</p>
-            <p className="text-muted-foreground text-sm">
-              Add your first vendor to use it in stock-in and expenses.
-            </p>
-          </div>
-          <Button onClick={() => setForm({ mode: "create" })} className="mt-1">
-            <Plus />
-            New supplier
+      <DirectoryToolbar
+        searchPlaceholder="Search name, contact, email"
+        searchLabel="Search suppliers"
+        newLabel="New supplier"
+        newIcon={<Plus />}
+        onNew={() => setForm({ mode: "create" })}
+        actions={
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload />
+            Import
           </Button>
-        </div>
+        }
+      />
+
+      {total === 0 ? (
+        q ? (
+          <DirectoryEmptyState
+            icon={<Truck className="size-5" />}
+            title="No suppliers match your search"
+            description="Try a different name, contact, or email — or clear the search to see everyone."
+            action={
+              <Button variant="outline" onClick={clearSearch}>
+                Clear search
+              </Button>
+            }
+          />
+        ) : (
+          <DirectoryEmptyState
+            icon={<Truck className="size-5" />}
+            title="No suppliers yet"
+            description="Add your first vendor to use it in stock-in and expenses."
+            action={
+              <Button onClick={() => setForm({ mode: "create" })}>
+                <Plus />
+                New supplier
+              </Button>
+            }
+          />
+        )
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
-            <TableHeader className="bg-muted/40">
-              {table.getHeaderGroups().map((group) => (
-                <TableRow key={group.id}>
-                  {group.headers.map((header) => (
-                    <TableHead key={header.id}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center">
-                    <span className="text-muted-foreground text-sm">
-                      No suppliers match your search.
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
+        <>
+          <div className="overflow-x-auto rounded-lg border">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                {table.getHeaderGroups().map((group) => (
+                  <TableRow key={group.id}>
+                    {group.headers.map((header) => (
+                      <TableHead key={header.id}>
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
                     ))}
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="h-24 text-center">
+                      <span className="text-muted-foreground text-sm">
+                        No results on this page.
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow key={row.id}>
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <TablePagination page={page} total={total} pageSize={pageSize} />
+        </>
       )}
 
       <SupplierFormDialog
@@ -215,6 +243,13 @@ export function SuppliersTable({
         onOpenChange={(open) => {
           if (!open) setForm(null);
         }}
+      />
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        descriptor={supplierImportDescriptor}
+        existingKeys={existingNames}
+        commitAction={bulkCreateSuppliersAction}
       />
       <DeleteConfirm
         open={deleteTarget !== null}

@@ -25,13 +25,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { ASSIGNABLE_ROLES, ROLE_LABELS } from "@/lib/roles";
-import { createUserAction, updateUserAction } from "@/modules/users/actions";
+import {
+  createUserAction,
+  resetUserPasswordAction,
+  updateUserAction,
+} from "@/modules/users/actions";
 import {
   createUserSchema,
-  updateUserSchema,
+  editUserFormSchema,
   type CreateUserInput,
-  type UpdateUserInput,
+  type EditUserFormInput,
 } from "@/modules/users/schema";
 import type { UserRow } from "@/modules/users/queries";
 
@@ -46,7 +51,7 @@ export function UserFormDialog({ open, onOpenChange, user }: Props) {
   const editing = Boolean(user);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{editing ? "Edit user" : "New user"}</DialogTitle>
@@ -227,24 +232,51 @@ function EditForm({ user, onDone }: { user: UserRow; onDone: () => void }) {
     handleSubmit,
     control,
     formState: { errors },
-  } = useForm<UpdateUserInput>({
-    resolver: zodResolver(updateUserSchema),
+  } = useForm<EditUserFormInput>({
+    resolver: zodResolver(editUserFormSchema),
     defaultValues: {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: (user.role as UpdateUserInput["role"]) ?? "ENGINEER",
+      role: (user.role as EditUserFormInput["role"]) ?? "ENGINEER",
+      newPassword: "",
+      confirmPassword: "",
     },
   });
 
-  function onSubmit(values: UpdateUserInput) {
+  function onSubmit(values: EditUserFormInput) {
     startTransition(async () => {
-      const result = await updateUserAction(values);
+      const result = await updateUserAction({
+        id: values.id,
+        name: values.name,
+        email: values.email,
+        role: values.role,
+      });
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      toast.success("Changes saved.");
+
+      // Optional reset is a separate guarded action (its credential write can't
+      // share the identity update's transaction). If it fails, the identity edit
+      // already committed — say so rather than silently swallowing it.
+      if (values.newPassword) {
+        const reset = await resetUserPasswordAction({
+          id: values.id,
+          newPassword: values.newPassword,
+          confirmPassword: values.confirmPassword,
+        });
+        if (!reset.ok) {
+          toast.error(`Changes saved, but the password reset failed: ${reset.error}`);
+          router.refresh();
+          onDone();
+          return;
+        }
+        toast.success("Changes saved and password reset.");
+      } else {
+        toast.success("Changes saved.");
+      }
+
       router.refresh();
       onDone();
     });
@@ -289,6 +321,42 @@ function EditForm({ user, onDone }: { user: UserRow; onDone: () => void }) {
           )}
         />
         <FieldError message={errors.role?.message} />
+      </div>
+
+      <Separator />
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Reset password</p>
+          <p className="text-muted-foreground text-xs">
+            Leave blank to keep their current password. Setting a new one signs them out of all
+            sessions and is recorded in the audit trail.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="newPassword">New password</Label>
+          <Input
+            id="newPassword"
+            type="password"
+            autoComplete="new-password"
+            disabled={isPending}
+            {...register("newPassword")}
+          />
+          <FieldError message={errors.newPassword?.message} />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="confirmPassword">Confirm new password</Label>
+          <Input
+            id="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            disabled={isPending}
+            {...register("confirmPassword")}
+          />
+          <FieldError message={errors.confirmPassword?.message} />
+        </div>
       </div>
 
       <DialogFooter>

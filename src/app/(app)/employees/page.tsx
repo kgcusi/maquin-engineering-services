@@ -4,12 +4,19 @@ import type { Metadata } from "next";
 import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { EmployeesTable } from "@/components/employees/employees-table";
 import { requirePagePermission } from "@/lib/page-guards";
-import { listEmployeePositions, listEmployees } from "@/modules/employees/queries";
+import {
+  listEmployeeNames,
+  listEmployeePositions,
+  listEmployees,
+} from "@/modules/employees/queries";
 import { getSettings } from "@/modules/settings/queries";
+import { directoryListSchema } from "@/modules/shared/list-params";
 
 export const metadata: Metadata = { title: "Employees" };
 
-export default async function EmployeesPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function EmployeesPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePagePermission("employee.view");
 
   return (
@@ -22,23 +29,29 @@ export default async function EmployeesPage() {
       </header>
 
       <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
-        <EmployeesSection />
+        <EmployeesSection searchParams={searchParams} />
       </Suspense>
     </div>
   );
 }
 
-async function EmployeesSection() {
-  const [employees, positions, settings] = await Promise.all([
-    listEmployees(),
+async function EmployeesSection({ searchParams }: { searchParams: SearchParams }) {
+  const params = directoryListSchema.parse(await searchParams);
+  const [result, positions, existingNames, settings] = await Promise.all([
+    listEmployees(params),
     listEmployeePositions(),
+    listEmployeeNames(),
     getSettings(),
   ]);
 
   return (
     <EmployeesTable
-      employees={employees}
+      rows={result.rows}
+      total={result.total}
+      page={result.page}
+      pageSize={result.pageSize}
       positions={positions}
+      existingNames={existingNames}
       timeZone={settings.timezone}
       currency={settings.currency}
     />

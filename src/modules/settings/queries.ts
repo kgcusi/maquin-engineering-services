@@ -8,6 +8,13 @@ import { CURRENCY_CODES, DEFAULT_SETTINGS, TIMEZONE_CODES, type AppSettings } fr
 const TIMEZONE_SET = new Set<string>(TIMEZONE_CODES);
 const CURRENCY_SET = new Set<string>(CURRENCY_CODES);
 
+// One read of `app_settings` → a key→value map. Shared by all three readers below
+// so each does a single round-trip and the keying logic lives in one place.
+async function fetchSettingsMap(): Promise<Map<string, unknown>> {
+  const rows = await db.select().from(appSettings);
+  return new Map(rows.map((row) => [row.key, row.value]));
+}
+
 // The app's ONLY `use cache` reader (docs/16 §7): firm-wide settings are
 // non-user-scoped and slow-changing, so they're the canonical opt-in. Reads
 // `app_settings` only — never the session — so it's cache-safe; returns a plain
@@ -19,8 +26,7 @@ export async function getSettings(): Promise<AppSettings> {
   cacheLife("max");
   cacheTag("settings");
 
-  const rows = await db.select().from(appSettings);
-  const byKey = new Map(rows.map((row) => [row.key, row.value]));
+  const byKey = await fetchSettingsMap();
 
   const tz = byKey.get("timezone");
   const currency = byKey.get("currency");
@@ -45,8 +51,7 @@ function readString(value: unknown): string | null {
 // client, so it reads app_settings live. Returns only a MASKED hint — the raw key
 // stays server-side. Cheap and rare (webmaster Settings screen only).
 export async function getEmailConfig(): Promise<EmailConfigView> {
-  const rows = await db.select().from(appSettings);
-  const byKey = new Map(rows.map((row) => [row.key, row.value]));
+  const byKey = await fetchSettingsMap();
   const apiKey = readString(byKey.get("resend_api_key"));
   return {
     fromAddress: readString(byKey.get("email_from")),
@@ -62,8 +67,7 @@ export async function getResendCredentials(): Promise<{
   apiKey: string | null;
   fromAddress: string | null;
 }> {
-  const rows = await db.select().from(appSettings);
-  const byKey = new Map(rows.map((row) => [row.key, row.value]));
+  const byKey = await fetchSettingsMap();
   return {
     apiKey: readString(byKey.get("resend_api_key")),
     fromAddress: readString(byKey.get("email_from")),

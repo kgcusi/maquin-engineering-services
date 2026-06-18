@@ -69,7 +69,6 @@ export const EMPLOYMENT_TYPES = [
   { code: "PROBATIONARY", label: "Probationary" },
   { code: "PROJECT_BASED", label: "Project-based" },
   { code: "CONTRACTUAL", label: "Contractual" },
-  { code: "SEASONAL", label: "Seasonal" },
 ] as const;
 
 export type EmploymentTypeCode = (typeof EMPLOYMENT_TYPES)[number]["code"];
@@ -86,19 +85,6 @@ export const RATE_UNITS = [
 export type RateUnitCode = (typeof RATE_UNITS)[number]["code"];
 export const RATE_UNIT_CODES = codesOf(RATE_UNITS);
 export const rateUnitLabel = labelLookup(RATE_UNITS);
-
-// ── Employee document kinds (attachments.kind for entity_type='employee') ──────
-// Stored verbatim (the stored value IS the label), so the document list shows it
-// directly with no extra mapping.
-export const EMPLOYEE_DOCUMENT_KINDS = [
-  "Contract",
-  "Government ID",
-  "Certificate",
-  "Resume",
-  "Other",
-] as const;
-
-export type EmployeeDocumentKind = (typeof EMPLOYEE_DOCUMENT_KINDS)[number];
 
 // ── Trades / labor disciplines (dsr_manpower.trade_code) ───────────────────────
 export const TRADES = [

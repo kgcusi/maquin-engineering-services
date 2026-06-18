@@ -74,7 +74,8 @@ async function AuditSection({
       <AuditTable
         rows={result.rows}
         page={result.page}
-        hasNext={result.hasNext}
+        total={result.total}
+        pageSize={result.pageSize}
         viewerIsWebmaster={viewerIsWebmaster}
         timeZone={settings.timezone}
       />

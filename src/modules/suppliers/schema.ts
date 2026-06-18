@@ -1,19 +1,24 @@
 import { z } from "zod";
 
-// Shared by the client form (zodResolver) and the Server Action guard. Optional
-// text fields accept "" (the form's empty value); the action normalizes "" → null.
-const name = z.string().trim().min(1, "Name is required").max(160, "Name is too long");
-const optionalEmail = z.union([z.literal(""), z.string().email("Enter a valid email")]).optional();
+import {
+  entityDocumentSchemas,
+  entityName,
+  optionalAddress,
+  optionalEmail,
+  optionalNotes,
+  optionalPhone,
+  optionalText,
+} from "@/modules/shared/contact-schema";
 
 export const createSupplierSchema = z.object({
-  name,
-  contactPerson: z.string().trim().max(160).optional(),
-  phone: z.string().trim().max(40).optional(),
+  name: entityName,
+  contactPerson: optionalText(160),
+  phone: optionalPhone,
   email: optionalEmail,
-  address: z.string().trim().max(300).optional(),
-  tin: z.string().trim().max(40).optional(),
-  paymentTerms: z.string().trim().max(120).optional(),
-  notes: z.string().trim().max(2000).optional(),
+  address: optionalAddress,
+  tin: optionalText(40),
+  paymentTerms: optionalText(120),
+  notes: optionalNotes,
 });
 
 export const updateSupplierSchema = createSupplierSchema.extend({ id: z.string().uuid() });
@@ -21,3 +26,11 @@ export const supplierIdSchema = z.object({ id: z.string().uuid() });
 
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>;
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>;
+
+// ── Supplier documents (file pipeline) + notes — supplierId scopes every op ─────
+const supplierDocs = entityDocumentSchemas("supplierId");
+export const presignSupplierDocumentSchema = supplierDocs.presign;
+export const confirmSupplierDocumentSchema = supplierDocs.confirm;
+export const supplierDocumentIdSchema = supplierDocs.docId;
+export const addSupplierNoteSchema = supplierDocs.addNote;
+export const supplierNoteIdSchema = supplierDocs.noteId;

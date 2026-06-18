@@ -5,21 +5,30 @@ import { ClientDetail } from "@/components/clients/client-detail";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getClientById, getClientDocuments, getClientNotes } from "@/modules/clients/queries";
 import { getSettings } from "@/modules/settings/queries";
+import { pageParam } from "@/modules/shared/list-params";
 
 export const metadata: Metadata = { title: "Client" };
 
-export default async function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ClientDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   await requirePagePermission("client.view");
   const { id } = await params;
+  const sp = await searchParams;
+  const docsPage = pageParam(sp.docsPage);
+  const notesPage = pageParam(sp.notesPage);
 
-  const client = await getClientById(id);
-  if (!client) notFound();
-
-  const [documents, notes, settings] = await Promise.all([
-    getClientDocuments(id),
-    getClientNotes(id),
+  const [client, documents, notes, settings] = await Promise.all([
+    getClientById(id),
+    getClientDocuments(id, docsPage),
+    getClientNotes(id, notesPage),
     getSettings(),
   ]);
+  if (!client) notFound();
 
   return (
     <ClientDetail

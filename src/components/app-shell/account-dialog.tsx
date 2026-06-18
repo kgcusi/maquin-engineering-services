@@ -78,7 +78,7 @@ export function AccountDialog({ open, onOpenChange, name, email, role, initials 
   }
 
   return (
-    <Dialog open={open} onOpenChange={close}>
+    <Dialog open={open} onOpenChange={close} disablePointerDismissal>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Account</DialogTitle>

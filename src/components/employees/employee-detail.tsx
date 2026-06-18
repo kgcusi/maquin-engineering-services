@@ -11,7 +11,7 @@ import { FileUploader } from "@/components/files/file-uploader";
 import { NotesPanel } from "@/components/notes/notes-panel";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/currency";
-import { EMPLOYEE_DOCUMENT_KINDS, employmentTypeLabel, rateUnitLabel } from "@/lib/lookups";
+import { employmentTypeLabel, rateUnitLabel } from "@/lib/lookups";
 import { cn } from "@/lib/utils";
 import {
   addEmployeeNoteAction,
@@ -24,6 +24,7 @@ import {
 import type { EmployeeRow } from "@/modules/employees/queries";
 import type { AttachmentRow } from "@/modules/files/service";
 import type { NoteRow } from "@/modules/notes/service";
+import type { Paginated } from "@/modules/shared/list-params";
 
 import { EmployeeFormDialog } from "./employee-form-dialog";
 
@@ -57,8 +58,8 @@ export function EmployeeDetail({
   currency,
 }: {
   employee: EmployeeRow;
-  documents: AttachmentRow[];
-  notes: NoteRow[];
+  documents: Paginated<AttachmentRow>;
+  notes: Paginated<NoteRow>;
   positions: string[];
   timeZone: string;
   currency: string;
@@ -73,8 +74,8 @@ export function EmployeeDetail({
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "Info" },
-    { key: "documents", label: `Documents${documents.length ? ` (${documents.length})` : ""}` },
-    { key: "notes", label: `Notes${notes.length ? ` (${notes.length})` : ""}` },
+    { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
+    { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
   ];
 
   return (
@@ -133,7 +134,7 @@ export function EmployeeDetail({
             <Field label="Address" value={employee.address} />
           </div>
           <div className="sm:col-span-2">
-            <Field label="Notes" value={employee.notes} />
+            <Field label="Remarks" value={employee.notes} />
           </div>
         </dl>
       ) : null}
@@ -141,14 +142,17 @@ export function EmployeeDetail({
       {tab === "documents" ? (
         <div className="max-w-2xl space-y-4">
           <FileUploader
-            kinds={EMPLOYEE_DOCUMENT_KINDS}
             onRequestUrl={(meta) => presignEmployeeDocumentAction({ employeeId: id, ...meta })}
-            onConfirm={(fileId, kind) =>
-              confirmEmployeeDocumentAction({ employeeId: id, fileId, kind })
+            onConfirm={(fileId, name) =>
+              confirmEmployeeDocumentAction({ employeeId: id, fileId, name })
             }
           />
           <AttachmentList
-            documents={documents}
+            documents={documents.rows}
+            page={documents.page}
+            total={documents.total}
+            pageSize={documents.pageSize}
+            paramKey="docsPage"
             timeZone={timeZone}
             onDownload={(attachmentId) =>
               getEmployeeDocumentUrlAction({ employeeId: id, attachmentId })
@@ -163,7 +167,11 @@ export function EmployeeDetail({
       {tab === "notes" ? (
         <div className="max-w-2xl">
           <NotesPanel
-            notes={notes}
+            notes={notes.rows}
+            page={notes.page}
+            total={notes.total}
+            pageSize={notes.pageSize}
+            paramKey="notesPage"
             timeZone={timeZone}
             onAdd={(body) => addEmployeeNoteAction({ employeeId: id, body })}
             onDelete={(noteId) => deleteEmployeeNoteAction({ employeeId: id, noteId })}

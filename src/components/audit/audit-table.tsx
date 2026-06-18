@@ -3,8 +3,9 @@
 import type { Route } from "next";
 import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Eye, ScrollText } from "lucide-react";
+import { Eye, ScrollText } from "lucide-react";
 
+import { TablePagination } from "@/components/directory/table-pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,13 +35,14 @@ function maskActor(row: AuditLogRow, viewerIsWebmaster: boolean): boolean {
 type Props = {
   rows: AuditLogRow[];
   page: number;
-  hasNext: boolean;
+  total: number;
+  pageSize: number;
   viewerIsWebmaster: boolean;
   /** Firm timezone (from settings) — timestamps render here. */
   timeZone: string;
 };
 
-export function AuditTable({ rows, page, hasNext, viewerIsWebmaster, timeZone }: Props) {
+export function AuditTable({ rows, page, total, pageSize, viewerIsWebmaster, timeZone }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -48,15 +50,7 @@ export function AuditTable({ rows, page, hasNext, viewerIsWebmaster, timeZone }:
 
   const filtered = [...params.keys()].some((key) => key !== "page");
 
-  function go(targetPage: number) {
-    const next = new URLSearchParams(params.toString());
-    if (targetPage <= 1) next.delete("page");
-    else next.set("page", String(targetPage));
-    const qs = next.toString();
-    router.push((qs ? `${pathname}?${qs}` : pathname) as Route);
-  }
-
-  if (rows.length === 0) {
+  if (total === 0) {
     return (
       <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
         <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
@@ -83,7 +77,7 @@ export function AuditTable({ rows, page, hasNext, viewerIsWebmaster, timeZone }:
 
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-lg border">
+      <div className="overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader className="bg-muted/40">
             <TableRow>
@@ -98,69 +92,68 @@ export function AuditTable({ rows, page, hasNext, viewerIsWebmaster, timeZone }:
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow
-                key={row.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`View details for ${row.action}`}
-                className="group cursor-pointer"
-                onClick={() => setSelected(row)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setSelected(row);
-                  }
-                }}
-              >
-                <TableCell className="text-muted-foreground tabular-nums">
-                  {formatDateTime(row.createdAt, timeZone, "datetime")}
-                </TableCell>
-                <TableCell>
-                  {maskActor(row, viewerIsWebmaster) ? (
-                    <span className="text-muted-foreground">System</span>
-                  ) : (
-                    <div className="flex flex-col">
-                      <span className="font-medium">{row.actorName ?? "Unknown user"}</span>
-                      {row.actorEmail ? (
-                        <span className="text-muted-foreground text-xs">{row.actorEmail}</span>
-                      ) : null}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{actionLabel(row.action)}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {entityTypeLabel(row.entityType)}
-                </TableCell>
-                <TableCell className="text-muted-foreground max-w-sm truncate">
-                  {row.summary}
-                </TableCell>
-                <TableCell className="w-12 text-right">
-                  <Eye className="text-muted-foreground/60 group-hover:text-foreground inline-block size-4 transition-colors" />
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-24 text-center">
+                  <span className="text-muted-foreground text-sm">No events on this page.</span>
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View details for ${row.action}`}
+                  className="group cursor-pointer"
+                  onClick={() => setSelected(row)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelected(row);
+                    }
+                  }}
+                >
+                  <TableCell className="text-muted-foreground tabular-nums">
+                    {formatDateTime(row.createdAt, timeZone, "datetime")}
+                  </TableCell>
+                  <TableCell>
+                    {maskActor(row, viewerIsWebmaster) ? (
+                      <span className="text-muted-foreground">System</span>
+                    ) : (
+                      <div className="flex flex-col">
+                        <span className="font-medium">{row.actorName ?? "Unknown user"}</span>
+                        {row.actorEmail ? (
+                          <span className="text-muted-foreground text-xs">{row.actorEmail}</span>
+                        ) : null}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{actionLabel(row.action)}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {entityTypeLabel(row.entityType)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground max-w-sm truncate">
+                    {row.summary}
+                  </TableCell>
+                  <TableCell className="w-12 text-right">
+                    <span
+                      aria-hidden
+                      className="border-border bg-background text-muted-foreground group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary inline-flex size-8 items-center justify-center rounded-md border transition-colors"
+                    >
+                      <Eye className="size-4" />
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
 
-      {(hasNext || page > 1) && (
-        <div className="flex items-center justify-between">
-          <p className="text-muted-foreground text-sm">Page {page}</p>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => go(page - 1)}>
-              <ChevronLeft />
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" disabled={!hasNext} onClick={() => go(page + 1)}>
-              Next
-              <ChevronRight />
-            </Button>
-          </div>
-        </div>
-      )}
+      <TablePagination page={page} total={total} pageSize={pageSize} />
 
       <AuditDetailDialog
         row={selected}

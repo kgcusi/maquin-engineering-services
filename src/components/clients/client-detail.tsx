@@ -22,6 +22,7 @@ import {
 import type { ClientRow } from "@/modules/clients/queries";
 import type { AttachmentRow } from "@/modules/files/service";
 import type { NoteRow } from "@/modules/notes/service";
+import type { Paginated } from "@/modules/shared/list-params";
 
 import { ClientFormDialog } from "./client-form-dialog";
 
@@ -45,8 +46,8 @@ export function ClientDetail({
   timeZone,
 }: {
   client: ClientRow;
-  documents: AttachmentRow[];
-  notes: NoteRow[];
+  documents: Paginated<AttachmentRow>;
+  notes: Paginated<NoteRow>;
   timeZone: string;
 }) {
   const [editOpen, setEditOpen] = useState(false);
@@ -55,8 +56,8 @@ export function ClientDetail({
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "info", label: "Info" },
-    { key: "documents", label: `Documents${documents.length ? ` (${documents.length})` : ""}` },
-    { key: "notes", label: `Notes${notes.length ? ` (${notes.length})` : ""}` },
+    { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
+    { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
     { key: "projects", label: "Projects" },
   ];
 
@@ -120,10 +121,16 @@ export function ClientDetail({
         <div className="max-w-2xl space-y-4">
           <FileUploader
             onRequestUrl={(meta) => presignClientDocumentAction({ clientId: id, ...meta })}
-            onConfirm={(fileId) => confirmClientDocumentAction({ clientId: id, fileId })}
+            onConfirm={(fileId, name) =>
+              confirmClientDocumentAction({ clientId: id, fileId, name })
+            }
           />
           <AttachmentList
-            documents={documents}
+            documents={documents.rows}
+            page={documents.page}
+            total={documents.total}
+            pageSize={documents.pageSize}
+            paramKey="docsPage"
             timeZone={timeZone}
             onDownload={(attachmentId) =>
               getClientDocumentUrlAction({ clientId: id, attachmentId })
@@ -136,7 +143,11 @@ export function ClientDetail({
       {tab === "notes" ? (
         <div className="max-w-2xl">
           <NotesPanel
-            notes={notes}
+            notes={notes.rows}
+            page={notes.page}
+            total={notes.total}
+            pageSize={notes.pageSize}
+            paramKey="notesPage"
             timeZone={timeZone}
             onAdd={(body) => addClientNoteAction({ clientId: id, body })}
             onDelete={(noteId) => deleteClientNoteAction({ clientId: id, noteId })}

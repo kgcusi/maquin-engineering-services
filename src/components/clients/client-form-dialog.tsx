@@ -41,7 +41,7 @@ type Props = {
 export function ClientFormDialog({ open, onOpenChange, client }: Props) {
   const editing = Boolean(client);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} disablePointerDismissal>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "Edit client" : "New client"}</DialogTitle>

@@ -10,6 +10,11 @@ describe("client schema", () => {
     expect(createClientSchema.safeParse({ name: "City Hall" }).success).toBe(true);
   });
 
+  it("normalizes a provided email to trimmed lowercase", () => {
+    const parsed = createClientSchema.parse({ name: "Acme", email: "Sales@Acme.com " });
+    expect(parsed.email).toBe("sales@acme.com");
+  });
+
   it("document presign validates mime + size", () => {
     const base = { clientId: UUID, filename: "contract.pdf", mime: "application/pdf", size: 1000 };
     expect(presignClientDocumentSchema.safeParse(base).success).toBe(true);

@@ -7,13 +7,18 @@ import { attachments } from "@/db/schema/attachments";
 import { auditLogs } from "@/db/schema/audit-logs";
 import { files } from "@/db/schema/files";
 import { notes } from "@/db/schema/notes";
-import { audit } from "@/lib/audit";
+import { audit, diffFields } from "@/lib/audit";
 import { auth } from "@/lib/auth";
 import { ActionError, action, actionNoTx, type ActionContext } from "@/lib/rbac";
 import { ROLES } from "@/lib/roles";
 
 import { assertNotHidden, assertNotSelf } from "./domain";
-import { createUserSchema, updateUserSchema, userIdSchema } from "./schema";
+import {
+  createUserSchema,
+  resetUserPasswordSchema,
+  updateUserSchema,
+  userIdSchema,
+} from "./schema";
 
 // Admin user provisioning. Authorization is OURS (the guard wrappers), so Better
 // Auth is used only where it must own the work — `createUser` (password hashing +
@@ -159,12 +164,71 @@ export const updateUserAction = action(
       entityType: "user",
       entityId: input.id,
       summary: `Updated ${target.name}`,
-      diff: {
-        name: { from: target.name, to: input.name },
-        email: { from: target.email, to: input.email },
-        role: { from: target.role, to: input.role },
-      },
+      diff: diffFields(
+        { name: target.name, email: target.email, role: target.role },
+        { name: input.name, email: input.email, role: input.role },
+      ),
     });
+
+    return { id: input.id };
+  },
+);
+
+// Admin password reset. NOT through Better Auth's admin `setUserPassword`
+// endpoint: that gate requires a Better-Auth-recognized admin session and would
+// reject WEBMASTER (deliberately absent from `adminRoles`). Authorization is OURS
+// (the `user.update` guard above), so we hash + write the credential straight
+// through Better Auth's server context — uniform for ADMIN and the hidden
+// WEBMASTER. No ambient transaction: the Drizzle adapter runs on its OWN pooled
+// connection, which must not nest inside one of ours (PgBouncer deadlock risk).
+export const resetUserPasswordAction = actionNoTx(
+  "user.update",
+  resetUserPasswordSchema,
+  async (input, { user: actor, db }) => {
+    const [target] = await db
+      .select({ id: user.id, name: user.name, role: user.role })
+      .from(user)
+      .where(eq(user.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("User not found.");
+    assertNotHidden(target.role);
+
+    const ctx = await auth.$context;
+    const hashedPassword = await ctx.password.hash(input.newPassword);
+    const accounts = await ctx.internalAdapter.findAccounts(input.id);
+    if (accounts.some((account) => account.providerId === "credential")) {
+      await ctx.internalAdapter.updatePassword(input.id, hashedPassword);
+    } else {
+      // Email/password account never linked (e.g. provisioned before credentials
+      // existed) — create it so the new password actually grants sign-in.
+      await ctx.internalAdapter.createAccount({
+        userId: input.id,
+        providerId: "credential",
+        accountId: input.id,
+        password: hashedPassword,
+      });
+    }
+
+    // The credential is changed. Revoke the target's sessions so the old password's
+    // sessions die and they must sign in anew — but never the acting admin's own
+    // (that would self-eject mid-edit). Audit is BEST-EFFORT, like create: the
+    // password already changed, so a failed log must not report the reset as failed.
+    try {
+      await db.transaction(async (tx) => {
+        if (input.id !== actor.id) {
+          await tx.delete(session).where(eq(session.userId, input.id));
+        }
+        await audit(tx, {
+          actorId: actor.id,
+          action: "user.password_reset",
+          entityType: "user",
+          entityId: input.id,
+          summary: `Reset password for ${target.name}`,
+        });
+      });
+    } catch (err) {
+      console.error("[users.resetPassword] password changed but audit/revoke failed", err);
+    }
 
     return { id: input.id };
   },

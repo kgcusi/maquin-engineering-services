@@ -5,11 +5,14 @@ import { TableSkeleton } from "@/components/app-shell/page-skeletons";
 import { UsersTable } from "@/components/users/users-table";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getSettings } from "@/modules/settings/queries";
+import { directoryListSchema } from "@/modules/shared/list-params";
 import { listVisibleUsers } from "@/modules/users/queries";
 
 export const metadata: Metadata = { title: "Users" };
 
-export default async function UsersPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function UsersPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePagePermission("user.view");
 
   return (
@@ -23,13 +26,23 @@ export default async function UsersPage() {
       </header>
 
       <Suspense fallback={<TableSkeleton columns={6} toolbar />}>
-        <UsersSection />
+        <UsersSection searchParams={searchParams} />
       </Suspense>
     </div>
   );
 }
 
-async function UsersSection() {
-  const [users, settings] = await Promise.all([listVisibleUsers(), getSettings()]);
-  return <UsersTable users={users} timeZone={settings.timezone} />;
+async function UsersSection({ searchParams }: { searchParams: SearchParams }) {
+  const params = directoryListSchema.parse(await searchParams);
+  const [result, settings] = await Promise.all([listVisibleUsers(params), getSettings()]);
+
+  return (
+    <UsersTable
+      rows={result.rows}
+      total={result.total}
+      page={result.page}
+      pageSize={result.pageSize}
+      timeZone={settings.timezone}
+    />
+  );
 }

@@ -13,7 +13,7 @@ export function SidebarBody() {
   return (
     <>
       <div className="flex h-14 shrink-0 items-center justify-center border-b px-4">
-        <Brand variant="horizontal" priority className="h-8" />
+        <Brand variant="horizontal" priority className="h-10" />
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2.5 py-3">

@@ -14,3 +14,9 @@ export const uploadFileFields = {
     .positive("That file looks empty.")
     .max(MAX_UPLOAD_BYTES, "File is too large (max 15 MB)."),
 };
+
+// Optional human-friendly name for an uploaded document (stored in attachments.label).
+// Blank → omitted by the uploader, so the list falls back to the file's own name.
+export const documentNameField = {
+  name: z.string().trim().max(120, "Name is too long").optional(),
+};

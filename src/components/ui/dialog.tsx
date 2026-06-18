@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button";
 import { XIcon } from "lucide-react";
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  // Ignore backdrop clicks so an accidental click-outside can't discard an
-  // in-progress form. Escape and the explicit close button still dismiss.
-  return <DialogPrimitive.Root data-slot="dialog" disablePointerDismissal {...props} />;
+  // Dismissible by default — click-outside, Escape, and the close button all close.
+  // Only dialogs that would lose work or change behaviour if closed by accident
+  // (forms, in-progress edits) opt out of click-outside by passing
+  // `disablePointerDismissal`. Read-only dialogs (e.g. the audit detail view) stay
+  // dismissible. Escape and the close button always dismiss regardless.
+  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {

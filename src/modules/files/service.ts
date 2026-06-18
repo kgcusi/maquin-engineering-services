@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 
 import type { Database } from "@/db/client";
 import { user } from "@/db/schema/auth";
@@ -9,6 +9,7 @@ import { audit } from "@/lib/audit";
 import { ActionError } from "@/lib/rbac";
 import { deleteObject, objectExists, presignDownload, presignUpload } from "@/lib/storage";
 import { buildFileKey, formatBytes, isAllowedMime, MAX_UPLOAD_BYTES } from "@/lib/uploads";
+import { offsetFor, type Paginated } from "@/modules/shared/list-params";
 
 // Reusable, polymorphic file/attachment pipeline over R2 + the files/attachments
 // tables (docs/17 §1, docs/16 §5). Auth-less and entity-agnostic: each CONSUMER
@@ -24,7 +25,6 @@ export type AttachmentRow = {
   mime: string;
   size: number;
   label: string | null;
-  kind: string | null;
   uploadedByName: string | null;
   createdAt: Date;
 };
@@ -71,7 +71,7 @@ export async function createPendingUpload(
  */
 export async function confirmAttachment(
   db: Database,
-  params: EntityRef & AuditParams & { fileId: string; label?: string | null; kind?: string | null },
+  params: EntityRef & AuditParams & { fileId: string; label?: string | null },
 ): Promise<{ attachmentId: string }> {
   const [file] = await db
     .select({ id: files.id, key: files.key, status: files.status, filename: files.filename })
@@ -99,7 +99,6 @@ export async function confirmAttachment(
         entityId: params.entityId,
         fileId: params.fileId,
         label: params.label ?? null,
-        kind: params.kind ?? null,
         createdBy: params.actorId,
       })
       .returning({ id: attachments.id });
@@ -117,35 +116,48 @@ export async function confirmAttachment(
   });
 }
 
-/** Confirmed attachments for an entity, newest first, with uploader name. */
+/** One page of confirmed attachments for an entity, newest first, with uploader
+ *  name and the full-set total for the tab count + pagination footer. */
 export async function listAttachments(
   db: Database,
   entityType: string,
   entityId: string,
-): Promise<AttachmentRow[]> {
-  return db
-    .select({
-      attachmentId: attachments.id,
-      fileId: files.id,
-      filename: files.filename,
-      mime: files.mime,
-      size: files.size,
-      label: attachments.label,
-      kind: attachments.kind,
-      uploadedByName: user.name,
-      createdAt: attachments.createdAt,
-    })
-    .from(attachments)
-    .innerJoin(files, eq(attachments.fileId, files.id))
-    .leftJoin(user, eq(attachments.createdBy, user.id))
-    .where(
-      and(
-        eq(attachments.entityType, entityType),
-        eq(attachments.entityId, entityId),
-        eq(files.status, "CONFIRMED"),
-      ),
-    )
-    .orderBy(desc(attachments.createdAt));
+  page: number,
+  pageSize: number,
+): Promise<Paginated<AttachmentRow>> {
+  const where = and(
+    eq(attachments.entityType, entityType),
+    eq(attachments.entityId, entityId),
+    eq(files.status, "CONFIRMED"),
+  );
+
+  const [rows, [{ value: total }]] = await Promise.all([
+    db
+      .select({
+        attachmentId: attachments.id,
+        fileId: files.id,
+        filename: files.filename,
+        mime: files.mime,
+        size: files.size,
+        label: attachments.label,
+        uploadedByName: user.name,
+        createdAt: attachments.createdAt,
+      })
+      .from(attachments)
+      .innerJoin(files, eq(attachments.fileId, files.id))
+      .leftJoin(user, eq(attachments.createdBy, user.id))
+      .where(where)
+      .orderBy(desc(attachments.createdAt))
+      .limit(pageSize)
+      .offset(offsetFor(page, pageSize)),
+    db
+      .select({ value: count() })
+      .from(attachments)
+      .innerJoin(files, eq(attachments.fileId, files.id))
+      .where(where),
+  ]);
+
+  return { rows, total, page, pageSize };
 }
 
 /** Short-lived presigned GET, scoped to the parent entity (defense in depth). */

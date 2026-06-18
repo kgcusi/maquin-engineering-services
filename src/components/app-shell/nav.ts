@@ -41,20 +41,6 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, live: true }],
   },
   {
-    label: "Setup",
-    items: [
-      { title: "Users", href: "/users", icon: Users, requires: "user.view", live: true },
-      { title: "Audit log", href: "/audit", icon: ScrollText, requires: "audit.view", live: true },
-      {
-        title: "Settings",
-        href: "/settings",
-        icon: Settings,
-        requires: "settings.view",
-        live: true,
-      },
-    ],
-  },
-  {
     label: "Directory",
     items: [
       // `as Route`: the typed-routes union only refreshes on build; the cast keeps
@@ -78,6 +64,20 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/employees" as Route,
         icon: Contact,
         requires: "employee.view",
+        live: true,
+      },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { title: "Users", href: "/users", icon: Users, requires: "user.view", live: true },
+      { title: "Audit log", href: "/audit", icon: ScrollText, requires: "audit.view", live: true },
+      {
+        title: "Settings",
+        href: "/settings",
+        icon: Settings,
+        requires: "settings.view",
         live: true,
       },
     ],

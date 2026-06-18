@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Download, FileText, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { TablePagination } from "@/components/directory/table-pagination";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,7 +16,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useProgressTransition } from "@/hooks/use-progress-transition";
 import { formatDateTime } from "@/lib/datetime";
@@ -26,12 +26,26 @@ type Result<T> = { ok: true; data: T } | { ok: false; error: string };
 
 type Props = {
   documents: AttachmentRow[];
+  page: number;
+  total: number;
+  pageSize: number;
+  /** Query-string key this panel pages on (e.g. `docsPage`). */
+  paramKey: string;
   timeZone: string;
   onDownload: (attachmentId: string) => Promise<Result<{ url: string; filename: string }>>;
   onDelete: (attachmentId: string) => Promise<Result<unknown>>;
 };
 
-export function AttachmentList({ documents, timeZone, onDownload, onDelete }: Props) {
+export function AttachmentList({
+  documents,
+  page,
+  total,
+  pageSize,
+  paramKey,
+  timeZone,
+  onDownload,
+  onDelete,
+}: Props) {
   const router = useRouter();
   const [isPending, start] = useProgressTransition();
   const [deleteTarget, setDeleteTarget] = useState<AttachmentRow | null>(null);
@@ -62,59 +76,64 @@ export function AttachmentList({ documents, timeZone, onDownload, onDelete }: Pr
     });
   }
 
-  if (documents.length === 0) {
+  if (total === 0) {
     return (
       <p className="text-muted-foreground rounded-lg border border-dashed py-10 text-center text-sm">
-        No documents yet. Upload contracts, permits, or other client files.
+        No documents yet. Upload contracts, permits, or other files.
       </p>
     );
   }
 
   return (
     <>
-      <ul className="divide-y rounded-lg border">
-        {documents.map((doc) => (
-          <li key={doc.attachmentId} className="flex items-center gap-3 p-3">
-            <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
-              <FileText className="size-4" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <p className="truncate text-sm font-medium">{doc.filename}</p>
-                {doc.kind ? (
-                  <Badge variant="secondary" className="shrink-0">
-                    {doc.kind}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="text-muted-foreground text-xs">
-                {formatBytes(doc.size)} · {doc.uploadedByName ?? "—"} ·{" "}
-                {formatDateTime(doc.createdAt, timeZone, "date")}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Download ${doc.filename}`}
-              disabled={isPending}
-              onClick={() => download(doc.attachmentId)}
-            >
-              <Download />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove ${doc.filename}`}
-              disabled={isPending}
-              onClick={() => setDeleteTarget(doc)}
-            >
-              <Trash2 className="text-destructive" />
-            </Button>
-          </li>
-        ))}
-      </ul>
+      {documents.length === 0 ? (
+        <p className="text-muted-foreground rounded-lg border border-dashed py-10 text-center text-sm">
+          No documents on this page.
+        </p>
+      ) : (
+        <ul className="divide-y rounded-lg border">
+          {documents.map((doc) => {
+            const title = doc.label ?? doc.filename;
+            return (
+              <li key={doc.attachmentId} className="flex items-center gap-3 p-3">
+                <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
+                  <FileText className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{title}</p>
+                  <p className="text-muted-foreground truncate text-xs">
+                    {doc.label ? `${doc.filename} · ` : ""}
+                    {formatBytes(doc.size)} · {doc.uploadedByName ?? "—"} ·{" "}
+                    {formatDateTime(doc.createdAt, timeZone, "date")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Download ${title}`}
+                  disabled={isPending}
+                  onClick={() => download(doc.attachmentId)}
+                >
+                  <Download />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Remove ${title}`}
+                  disabled={isPending}
+                  onClick={() => setDeleteTarget(doc)}
+                >
+                  <Trash2 className="text-destructive" />
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <TablePagination compact page={page} total={total} pageSize={pageSize} paramKey={paramKey} />
 
       <AlertDialog
         open={deleteTarget !== null}
@@ -126,8 +145,8 @@ export function AttachmentList({ documents, timeZone, onDownload, onDelete }: Pr
           <AlertDialogHeader>
             <AlertDialogTitle>Remove document?</AlertDialogTitle>
             <AlertDialogDescription>
-              <span className="font-medium">{deleteTarget?.filename}</span> will be permanently
-              deleted from storage. This can&apos;t be undone.
+              <span className="font-medium">{deleteTarget?.label ?? deleteTarget?.filename}</span>{" "}
+              will be permanently deleted from storage. This can&apos;t be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

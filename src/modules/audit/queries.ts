@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, gte, isNull, lte, notInArray, or, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, lte, notInArray, or, type SQL } from "drizzle-orm";
 
 import { db } from "@/db/client";
 import { auditLogs } from "@/db/schema/audit-logs";
 import { user } from "@/db/schema/auth";
 import { HIDDEN_ROLES, visibleUserWhere } from "@/lib/rbac";
+import type { Paginated } from "@/modules/shared/list-params";
 
 import type { AuditFilterValues } from "./schema";
 
@@ -28,11 +29,9 @@ export type AuditLogRow = {
   actorRole: string | null;
 };
 
-export type AuditPage = {
-  rows: AuditLogRow[];
-  page: number;
-  hasNext: boolean;
-};
+// Same shape as every other paginated list so the viewer can reuse the shared
+// numbered footer (`TablePagination`) — consistent paging across the whole app.
+export type AuditPage = Paginated<AuditLogRow>;
 
 // The hidden WEBMASTER must never be exposed as a selectable actor — the dropdown
 // is built from visible users only (mirrors every other user picker, docs/03).
@@ -63,8 +62,8 @@ function filterClauses(filters: AuditFilterValues): SQL | undefined {
   return clauses.length ? and(...clauses) : undefined;
 }
 
-/** Global audit viewer: filtered, newest-first, one page at a time. Fetches one
- *  extra row to know whether a next page exists without a separate count query.
+/** Global audit viewer: filtered, newest-first, one page at a time, with a
+ *  sibling COUNT(*) over the same WHERE for the numbered footer's "of Z" total.
  *  A non-webmaster viewer never sees the hidden superuser's own actions (the
  *  hidden-superuser invariant, docs/03) — genuine null-actor "System" rows stay
  *  visible. A webmaster viewer sees everything. */
@@ -78,17 +77,27 @@ export async function listAuditLogs(
   const visibilityClause = viewerIsWebmaster
     ? undefined
     : or(isNull(auditLogs.actorId), notInArray(user.role, HIDDEN_ROLES as string[]));
-  const rows = await db
-    .select(auditColumns)
-    .from(auditLogs)
-    .leftJoin(user, eq(auditLogs.actorId, user.id))
-    .where(and(filterClauses(filters), visibilityClause))
-    .orderBy(desc(auditLogs.createdAt))
-    .limit(AUDIT_PAGE_SIZE + 1)
-    .offset((page - 1) * AUDIT_PAGE_SIZE);
+  const where = and(filterClauses(filters), visibilityClause);
 
-  const hasNext = rows.length > AUDIT_PAGE_SIZE;
-  return { rows: hasNext ? rows.slice(0, AUDIT_PAGE_SIZE) : rows, page, hasNext };
+  const [rows, [{ value: total }]] = await Promise.all([
+    db
+      .select(auditColumns)
+      .from(auditLogs)
+      .leftJoin(user, eq(auditLogs.actorId, user.id))
+      .where(where)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(AUDIT_PAGE_SIZE)
+      .offset((page - 1) * AUDIT_PAGE_SIZE),
+    // The visibility clause references the joined user.role, so the count needs
+    // the same leftJoin.
+    db
+      .select({ value: count() })
+      .from(auditLogs)
+      .leftJoin(user, eq(auditLogs.actorId, user.id))
+      .where(where),
+  ]);
+
+  return { rows, total, page, pageSize: AUDIT_PAGE_SIZE };
 }
 
 /** The audit trail for a single record, newest-first. Reusable by the future

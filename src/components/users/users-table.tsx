@@ -1,9 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { MoreHorizontal, Search, Trash2, UserCog, UserPlus, UserX } from "lucide-react";
+import { MoreHorizontal, Trash2, UserCog, UserPlus, Users, UserX } from "lucide-react";
 
+import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
+import { DirectoryEmptyState } from "@/components/directory/empty-state";
+import { TablePagination } from "@/components/directory/table-pagination";
+import { useListQuery } from "@/components/directory/use-list-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +16,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -117,25 +120,29 @@ const columns: ColumnDef<UserRow>[] = [
   },
 ];
 
-export function UsersTable({ users, timeZone }: { users: UserRow[]; timeZone: string }) {
+export function UsersTable({
+  rows,
+  total,
+  page,
+  pageSize,
+  timeZone,
+}: {
+  rows: UserRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  timeZone: string;
+}) {
   const [form, setForm] = useState<FormState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserRow | null>(null);
-  const [query, setQuery] = useState("");
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return users;
-    return users.filter(
-      (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
-    );
-  }, [users, query]);
+  const { q, clearSearch } = useListQuery();
 
   // TanStack Table returns non-memoizable functions; the React Compiler skips
   // optimizing this component, which is fine for a small client-side list.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: filtered,
+    data: rows,
     columns,
     getCoreRowModel: getCoreRowModel(),
     meta: {
@@ -149,76 +156,81 @@ export function UsersTable({ users, timeZone }: { users: UserRow[]; timeZone: st
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-xs">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name or email"
-            className="pl-8"
-            aria-label="Search users"
-          />
-        </div>
-        <Button onClick={() => setForm({ mode: "create" })}>
-          <UserPlus />
-          New user
-        </Button>
-      </div>
+      <DirectoryToolbar
+        searchPlaceholder="Search name or email"
+        searchLabel="Search users"
+        newLabel="New user"
+        newIcon={<UserPlus />}
+        onNew={() => setForm({ mode: "create" })}
+      />
 
-      {users.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
-          <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
-            <UserPlus className="size-5" />
-          </span>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">No users yet</p>
-            <p className="text-muted-foreground text-sm">
-              Provision the first account to get started.
-            </p>
-          </div>
-          <Button onClick={() => setForm({ mode: "create" })} className="mt-1">
-            <UserPlus />
-            New user
-          </Button>
-        </div>
+      {total === 0 ? (
+        q ? (
+          <DirectoryEmptyState
+            icon={<Users className="size-5" />}
+            title="No users match your search"
+            description="Try a different name or email — or clear the search to see everyone."
+            action={
+              <Button variant="outline" onClick={clearSearch}>
+                Clear search
+              </Button>
+            }
+          />
+        ) : (
+          <DirectoryEmptyState
+            icon={<Users className="size-5" />}
+            title="No users yet"
+            description="Provision the first account to get started."
+            action={
+              <Button onClick={() => setForm({ mode: "create" })}>
+                <UserPlus />
+                New user
+              </Button>
+            }
+          />
+        )
       ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <Table>
-            <TableHeader className="bg-muted/40">
-              {table.getHeaderGroups().map((group) => (
-                <TableRow key={group.id}>
-                  {group.headers.map((header) => (
-                    <TableHead key={header.id}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(header.column.columnDef.header, header.getContext())}
-                    </TableHead>
-                  ))}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center">
-                    <span className="text-muted-foreground text-sm">No users match “{query}”.</span>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                table.getRowModel().rows.map((row) => (
-                  <TableRow key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
+        <>
+          <div className="overflow-x-auto rounded-lg border">
+            <Table>
+              <TableHeader className="bg-muted/40">
+                {table.getHeaderGroups().map((group) => (
+                  <TableRow key={group.id}>
+                    {group.headers.map((header) => (
+                      <TableHead key={header.id}>
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
                     ))}
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="h-24 text-center">
+                      <span className="text-muted-foreground text-sm">
+                        No results on this page.
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow key={row.id}>
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <TablePagination page={page} total={total} pageSize={pageSize} />
+        </>
       )}
 
       <UserFormDialog

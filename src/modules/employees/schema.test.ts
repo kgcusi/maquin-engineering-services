@@ -28,17 +28,30 @@ describe("employee schema", () => {
     expect(createEmployeeSchema.safeParse({ ...base, email: "nope" }).success).toBe(false);
   });
 
+  it("normalizes a provided email to trimmed lowercase", () => {
+    const parsed = createEmployeeSchema.parse({
+      fullName: "J",
+      rateUnit: "DAILY",
+      email: "Juan.Cruz@Example.com ",
+    });
+    expect(parsed.email).toBe("juan.cruz@example.com");
+  });
+
   it("rejects an unknown rate basis", () => {
     expect(createEmployeeSchema.safeParse({ fullName: "J", rateUnit: "YEARLY" }).success).toBe(
       false,
     );
   });
 
-  it("document confirm requires uuids + a known document type", () => {
-    const base = { employeeId: UUID, fileId: UUID, kind: "Contract" };
+  it("document confirm requires uuids and accepts an optional name", () => {
+    const base = { employeeId: UUID, fileId: UUID };
     expect(confirmEmployeeDocumentSchema.safeParse(base).success).toBe(true);
-    expect(confirmEmployeeDocumentSchema.safeParse({ ...base, kind: "Random" }).success).toBe(
-      false,
-    );
+    expect(
+      confirmEmployeeDocumentSchema.safeParse({ ...base, name: "Signed contract" }).success,
+    ).toBe(true);
+    expect(
+      confirmEmployeeDocumentSchema.safeParse({ ...base, name: "x".repeat(121) }).success,
+    ).toBe(false);
+    expect(confirmEmployeeDocumentSchema.safeParse({ employeeId: UUID }).success).toBe(false);
   });
 });

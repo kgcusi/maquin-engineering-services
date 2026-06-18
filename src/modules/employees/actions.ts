@@ -1,10 +1,12 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 
 import type { Database } from "@/db/client";
 import { employees } from "@/db/schema/employees";
-import { audit } from "@/lib/audit";
+import { orNull, requireEntityRef } from "@/lib/action-helpers";
+import { audit, diffFields } from "@/lib/audit";
 import { Money } from "@/lib/money";
 import { ActionError, action, actionNoTx } from "@/lib/rbac";
 import {
@@ -14,11 +16,13 @@ import {
   removeAttachment,
 } from "@/modules/files/service";
 import { addNote, removeNote } from "@/modules/notes/service";
+import { IMPORT_ROW_LIMIT } from "@/modules/shared/import";
 
 import {
   addEmployeeNoteSchema,
   confirmEmployeeDocumentSchema,
   createEmployeeSchema,
+  type CreateEmployeeInput,
   employeeDocumentIdSchema,
   employeeIdSchema,
   employeeNoteIdSchema,
@@ -27,38 +31,39 @@ import {
 } from "./schema";
 
 const ENTITY = "employee";
-const orNull = (v?: string | null) => (v && v.length ? v : null);
 const toRate = (v?: string) => (v && v.length ? Money.fromDecimal(v) : null);
 
-async function requireEmployeeName(db: Database, id: string): Promise<string> {
-  const [row] = await db
-    .select({ name: employees.fullName })
-    .from(employees)
-    .where(eq(employees.id, id))
-    .limit(1);
-  if (!row) throw new ActionError("Employee not found.");
-  return row.name;
-}
+const requireEmployeeName = (db: Database, id: string) =>
+  requireEntityRef(db, {
+    label: "Employee",
+    table: employees,
+    idColumn: employees.id,
+    nameColumn: employees.fullName,
+    id,
+  });
+
+// Shared create → row mapping (single create + bulk import stay in lockstep);
+// `rate` becomes a Money VO, optional text columns become null.
+const toEmployeeValues = (input: CreateEmployeeInput) => ({
+  fullName: input.fullName,
+  position: orNull(input.position),
+  employmentType: orNull(input.employmentType),
+  dateHired: orNull(input.dateHired),
+  phone: orNull(input.phone),
+  email: orNull(input.email),
+  address: orNull(input.address),
+  rate: toRate(input.rate),
+  rateUnit: input.rateUnit,
+  notes: orNull(input.notes),
+});
 
 export const createEmployeeAction = action(
   "employee.manage",
   createEmployeeSchema,
   async (input, { user: actor, tx }) => {
-    const [created] = await tx
-      .insert(employees)
-      .values({
-        fullName: input.fullName,
-        position: orNull(input.position),
-        employmentType: orNull(input.employmentType),
-        dateHired: orNull(input.dateHired),
-        phone: orNull(input.phone),
-        email: orNull(input.email),
-        address: orNull(input.address),
-        rate: toRate(input.rate),
-        rateUnit: input.rateUnit,
-        notes: orNull(input.notes),
-      })
-      .returning({ id: employees.id });
+    const [created] = await tx.insert(employees).values(toEmployeeValues(input)).returning({
+      id: employees.id,
+    });
 
     await audit(tx, {
       actorId: actor.id,
@@ -73,41 +78,78 @@ export const createEmployeeAction = action(
   },
 );
 
+// Bulk create from a validated CSV/XLSX import — re-validated server-side, one
+// statement in the action's transaction, one audit summary entry.
+export const bulkCreateEmployeesAction = action(
+  "employee.manage",
+  z.array(createEmployeeSchema).min(1).max(IMPORT_ROW_LIMIT),
+  async (rows, { user: actor, tx }) => {
+    await tx.insert(employees).values(rows.map(toEmployeeValues));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "employee.imported",
+      entityType: ENTITY,
+      summary: `Imported ${rows.length} employee${rows.length === 1 ? "" : "s"}`,
+      diff: { count: rows.length },
+    });
+    return { count: rows.length };
+  },
+);
+
 export const updateEmployeeAction = action(
   "employee.manage",
   updateEmployeeSchema,
   async (input, { user: actor, tx }) => {
     const [target] = await tx
-      .select({ id: employees.id, fullName: employees.fullName })
+      .select({
+        fullName: employees.fullName,
+        position: employees.position,
+        employmentType: employees.employmentType,
+        dateHired: employees.dateHired,
+        phone: employees.phone,
+        email: employees.email,
+        address: employees.address,
+        rate: employees.rate,
+        rateUnit: employees.rateUnit,
+        notes: employees.notes,
+      })
       .from(employees)
       .where(eq(employees.id, input.id))
       .limit(1);
     if (!target) throw new ActionError("Employee not found.");
 
+    const nextRate = toRate(input.rate);
+    const next = {
+      fullName: input.fullName,
+      position: orNull(input.position),
+      employmentType: orNull(input.employmentType),
+      dateHired: orNull(input.dateHired),
+      phone: orNull(input.phone),
+      email: orNull(input.email),
+      address: orNull(input.address),
+      rate: nextRate,
+      rateUnit: input.rateUnit,
+      notes: orNull(input.notes),
+    };
+
     await tx
       .update(employees)
-      .set({
-        fullName: input.fullName,
-        position: orNull(input.position),
-        employmentType: orNull(input.employmentType),
-        dateHired: orNull(input.dateHired),
-        phone: orNull(input.phone),
-        email: orNull(input.email),
-        address: orNull(input.address),
-        rate: toRate(input.rate),
-        rateUnit: input.rateUnit,
-        notes: orNull(input.notes),
-        updatedAt: new Date(),
-      })
+      .set({ ...next, updatedAt: new Date() })
       .where(eq(employees.id, input.id));
 
+    // `rate` is a Money VO — compare and record it as its decimal string so the
+    // diff stays readable (and Money objects don't false-trigger on identity).
+    const moneyStr = (m: Money | null) => m?.toDecimalString() ?? null;
     await audit(tx, {
       actorId: actor.id,
       action: "employee.updated",
       entityType: ENTITY,
       entityId: input.id,
       summary: `Updated employee ${input.fullName}`,
-      diff: { fullName: { from: target.fullName, to: input.fullName } },
+      diff: diffFields(
+        { ...target, rate: moneyStr(target.rate) },
+        { ...next, rate: moneyStr(nextRate) },
+      ),
     });
 
     return { id: input.id };
@@ -167,10 +209,10 @@ export const confirmEmployeeDocumentAction = actionNoTx(
       fileId: input.fileId,
       entityType: ENTITY,
       entityId: input.employeeId,
-      kind: input.kind,
+      label: input.name,
       actorId: actor.id,
       auditAction: "employee.document.added",
-      auditSummary: `Added a ${input.kind} to ${name}`,
+      auditSummary: `Added a document to ${name}`,
     });
   },
 );
