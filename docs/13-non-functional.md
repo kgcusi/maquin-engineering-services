@@ -7,7 +7,7 @@ raw scale.
 ## 1. Security
 
 ### Authentication
-- Passwords hashed with Argon2id (or bcrypt, cost ≥ 12). No plaintext, ever.
+- Passwords hashed by **Better Auth** (scrypt by default), stored in `account.password`. No plaintext, ever.
 - Sessions in **HTTP-only, Secure, SameSite** cookies; reasonable expiry + idle timeout.
 - Rate-limit and lock out repeated failed logins; log them ([12](12-audit-trail.md)).
 - No public sign-up; admin-provisioned accounts only. Deactivate, never expose deletion.

@@ -89,10 +89,13 @@ insert `−RELEASE` ledger at source → decrement balance → `release_lines` �
 `release.created` event.
 
 ### 5.3 Site Receiving
-For each released line: engineer enters received qty. If sites are tracked as locations, insert
-`+RECEIPT` at the site location → bump site balance. Compute `shortage = released − received`.
-If shortage > 0: create `site_receipt` status `SHORT` and (per policy) an
-`inventory_movements` `LOSS` (or `DAMAGE`) **pending approval** for the missing qty. Emit
+For each released line: engineer enters received qty. Sites **are** locations (non-optional,
+[17](17-audit-decisions.md) §3), so insert `+RECEIPT` at the site location → bump site balance.
+Compute `shortage = released − received`. If shortage > 0: open a discrepancy tagged with a
+**neutral reason** (In transit / Partial / Miscount / Damaged / Lost — [17](17-audit-decisions.md)
+§6), not a stored `OK/SHORT/OVER/DAMAGED` status. **Only** *Damaged*/*Lost* posts an
+approval-gated `inventory_movements` `DAMAGE`/`LOSS`; *In transit*/*Partial* stays an open
+discrepancy that auto-reconciles on a later receipt (**no auto-created LOSS/DAMAGE**). Emit
 `receiving.confirmed` / `receiving.discrepancy`.
 
 ### 5.4 Return
@@ -117,19 +120,19 @@ recount, and it is fully audited.
 
 ## 6. Usage from Daily Site Reports
 
-`dsr_materials` rows linked to an `item_id` represent consumption. Two policy options — **pick
-one and document it on the project/settings**:
+`dsr_materials` rows linked to an `item_id` represent consumption. **Policy is fixed (Option A, no
+per-project toggle — [17](17-audit-decisions.md) §3/§10.4):**
 
-- **Option A — Post on submit (simple, recommended for v1).** When a DSR is submitted, each
-  linked material posts a `−USAGE` ledger row at the project's site location, reducing site
-  on-hand immediately. Editing a submitted DSR posts reversing rows.
-- **Option B — Stage then confirm.** Usage is recorded but only posts to the ledger when an
-  admin confirms the day's consumption. Safer for disputed sites, more workflow.
+- On DSR submit, each linked material posts a `−USAGE` ledger row at the project's site location,
+  carrying `source_type='dsr_material'` + `source_id = dsr_materials.id` (line-level provenance).
+- **Stage 2 only reserves the link** (`dsr_materials` gets a stable uuid PK); the actual `−USAGE`
+  posting is wired in **Stage 3** once the ledger exists.
+- Editing/re-opening a submitted DSR is modeled as **new `dsr_materials` rows**, so reversal posts
+  compensating entries against the exact original `source_id`s — the target never moves.
 
-Either way, **Used** in the issued/used/remaining math comes from these USAGE rows, so the
-report always reconciles with the ledger. Negative on-hand (using more than received) is either
-blocked or flagged depending on policy (default: allow but flag, since the field reality may
-precede paperwork).
+**Used** in the issued/used/remaining math comes from these USAGE rows, so the report always
+reconciles with the ledger. Negative on-hand (using more than received) is allowed but flagged by
+default, since field reality may precede paperwork.
 
 ## 7. Traceability queries (what the ledger gives you for free)
 

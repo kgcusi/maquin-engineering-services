@@ -22,6 +22,7 @@ export type SupplierRow = {
   address: string | null;
   tin: string | null;
   paymentTerms: string | null;
+  isActive: boolean;
   notes: string | null;
   deletedAt: Date | null;
   createdAt: Date;
@@ -36,14 +37,18 @@ const COLUMNS = {
   address: suppliers.address,
   tin: suppliers.tin,
   paymentTerms: suppliers.paymentTerms,
+  isActive: suppliers.isActive,
   notes: suppliers.notes,
   deletedAt: suppliers.deletedAt,
   createdAt: suppliers.createdAt,
 } as const;
 
-// Active suppliers only (soft-deleted are hidden), newest first, one page at a
-// time with an optional name/contact/email search. Sibling COUNT(*) powers the
-// numbered footer.
+// Directory list: every non-deleted supplier (both active AND inactive), newest
+// first, one page at a time with an optional name/contact/email search — admins
+// manage status here, so inactive rows stay visible with a badge. Sibling
+// COUNT(*) powers the numbered footer.
+// CONVENTION: selection pickers in other modules must filter active-only with
+// `and(isNull(suppliers.deletedAt), eq(suppliers.isActive, true))`.
 export async function listSuppliers(params: DirectoryListParams): Promise<Paginated<SupplierRow>> {
   const where = and(
     isNull(suppliers.deletedAt),

@@ -2,16 +2,23 @@
 
 ## 1. Model
 
-Two roles ship in v1, but access is expressed as **permissions** so finer roles can be added
-later without rewriting logic.
+Three roles ship visibly — `ADMIN`, `ENGINEER`, `QA_QC_ENGINEER` — plus the hidden `WEBMASTER`
+superuser, but access is expressed as **permissions** so finer roles can be added later without
+rewriting logic.
 
-- **Role** → a named bundle (`ADMIN`, `ENGINEER`).
+- **Role** → a named bundle (`ADMIN`, `ENGINEER`, `QA_QC_ENGINEER`).
 - **Permission** → a single capability key (`expense.approve`, `project.create`).
 - A user has one role; a role grants a set of permissions.
 
-The permission keys are the stable contract. The two-role mapping is just the v1 default
-bundle. When the firm later needs a "Warehouse Keeper" or "Accountant," you create a new
-role and assign existing permission keys — no code changes in the guards.
+The permission keys are the stable contract; the role→permission mapping is just the default
+bundle. `QA_QC_ENGINEER` is the first proof of the "add a role from existing keys" path: when
+the firm later needs a "Warehouse Keeper" or "Accountant," you create a new role and assign
+existing permission keys — no code changes in the guards.
+
+> **Roles the client names that are _not_ new roles.** "GM / OM" (General / Operations Manager)
+> map to **`ADMIN`** — they create projects and tasks with full firm-wide access. "Purchasing"
+> is **not a role**: it's the Material Request flow ([04](04-modules.md) §5.16, Stage 3) where
+> engineers raise requests and Admin approves.
 
 > **Two enforcement layers, both required.** The UI hides what a user can't do (good UX), and
 > the **server re-checks every request** (real security). Never trust the client. Engineers
@@ -33,6 +40,7 @@ Grouped by area. `*` is shorthand for all actions in a group.
 | Projects | `project.view.all` `project.view.assigned` `project.create` `project.update` `project.delete` |
 | Phases/Tasks | `task.view` `task.manage` `task.update.progress` |
 | Daily Reports | `dsr.view` `dsr.create` `dsr.update.own` `dsr.view.all` |
+| Inspections _(reserved; module ships post-Stage-2 — [04](04-modules.md) §5.10a)_ | `inspection.request` `inspection.view.assigned` `inspection.view.all` `inspection.record` |
 | Budget | `budget.view` `budget.manage` `budget.adjust` |
 | Expenses | `expense.view` `expense.create` `expense.approve` |
 | Cash Flow | `cashflow.view` `cashflow.manage` |
@@ -51,36 +59,47 @@ Grouped by area. `*` is shorthand for all actions in a group.
 
 ✅ granted · — not granted · 🔶 scoped to assigned projects / own records
 
-| Capability | Admin | Engineer |
-|------------|:-----:|:--------:|
-| Manage users | ✅ | — |
-| Manage system settings | ✅ | — |
-| View audit trail | ✅ | — |
-| Manage employees / clients / suppliers | ✅ | — |
-| View all projects | ✅ | — |
-| View assigned projects | ✅ | 🔶 |
-| Create / edit / delete projects | ✅ | — |
-| Manage phases & tasks | ✅ | 🔶 update progress on assigned |
-| Create daily site reports | ✅ | 🔶 own assigned projects |
-| View all daily reports | ✅ | 🔶 assigned only |
-| Manage budgets | ✅ | — |
-| Create expenses | ✅ | 🔶 (optional — see note) |
-| Approve expenses | ✅ | — |
-| Manage cash flow | ✅ | — |
-| Decide approvals | ✅ | — |
-| Manage inventory master data | ✅ | — |
-| Record stock-in | ✅ | — |
-| Create material requests | ✅ | 🔶 for assigned projects |
-| Approve material requests | ✅ | — |
-| Record release | ✅ | — |
-| Confirm site receiving | ✅ | 🔶 receiving at their site |
-| Create movements (return/transfer/damage/…) | ✅ | 🔶 return/damage/loss from their site |
-| Approve movements | ✅ | — |
-| View inventory ledger | ✅ | 🔶 items relevant to their projects |
-| View reports | ✅ | 🔶 their projects only |
-| Export reports | ✅ | 🔶 their projects only |
-| Admin dashboard | ✅ | — |
-| Engineer dashboard | — | ✅ |
+| Capability | Admin | Engineer | QA/QC Eng |
+|------------|:-----:|:--------:|:---------:|
+| Manage users | ✅ | — | — |
+| Manage system settings | ✅ | — | — |
+| View audit trail | ✅ | — | — |
+| Manage employees / clients / suppliers | ✅ | — | — |
+| View all projects | ✅ | — | — |
+| View assigned projects | ✅ | 🔶 | 🔶 granted on inspection request |
+| Create / edit / delete projects | ✅ | — | — |
+| View phases & tasks | ✅ | 🔶 assigned | 🔶 assigned |
+| Create / assign / edit tasks (`task.manage`) | ✅ | 🔶 assigned projects | — |
+| Update task progress (`task.update.progress`) | ✅ | 🔶 assigned | — |
+| Request inspection (`inspection.request`) | ✅ | 🔶 assigned project/task | — |
+| Record inspection result (`inspection.record`) | ✅ | — | 🔶 assigned |
+| View inspections | ✅ | 🔶 own requests | 🔶 assigned |
+| Create daily site reports | ✅ | 🔶 own assigned projects | — |
+| View all daily reports | ✅ | 🔶 assigned only | — |
+| Manage budgets | ✅ | — | — |
+| Create expenses | ✅ | 🔶 (optional — see note) | — |
+| Approve expenses | ✅ | — | — |
+| Manage cash flow | ✅ | — | — |
+| Decide approvals | ✅ | — | — |
+| Manage inventory master data | ✅ | — | — |
+| Record stock-in | ✅ | — | — |
+| Create material requests | ✅ | 🔶 for assigned projects | — |
+| Approve material requests | ✅ | — | — |
+| Record release | ✅ | — | — |
+| Confirm site receiving | ✅ | 🔶 receiving at their site | — |
+| Create movements (return/transfer/damage/…) | ✅ | 🔶 return/damage/loss from their site | — |
+| Approve movements | ✅ | — | — |
+| View inventory ledger | ✅ | 🔶 items relevant to their projects | — |
+| View reports | ✅ | 🔶 their projects only | — |
+| Export reports | ✅ | 🔶 their projects only | — |
+| Admin dashboard | ✅ | — | — |
+| Engineer dashboard | — | ✅ | ✅ |
+
+> **Inspection rows are reserved.** The QA/QC inspection *module* ships post-Stage-2
+> ([04](04-modules.md) §5.10a, [17](17-audit-decisions.md) §10); the `QA_QC_ENGINEER` role and
+> its project-scoping land in **Stage 2** so the keys have a home. Note the split of the old
+> "Manage phases & tasks" row: engineers now **create/assign tasks** on assigned projects
+> (`task.manage`, scoped), not just update progress.
 
 > **Note on engineer-created expenses:** the proposal says "user submits expense." If
 > engineers may submit expenses, give them `expense.create` (scoped to assigned projects);
@@ -91,9 +110,11 @@ Grouped by area. `*` is shorthand for all actions in a group.
 
 These are enforced in the data-access layer, applied to **every** query an engineer makes:
 
-1. **Project scope.** An engineer sees a project only if `lead_engineer_id = user.id` (or they
-   appear in `project_members`). Every list/detail/report query for engineers is filtered by
-   this set of project ids.
+1. **Project scope.** An engineer sees a project only if they appear in `project_members` for it
+   (the access grant — [17](17-audit-decisions.md) §10.1); `lead_engineer_id` merely names the
+   lead. Enforced by one `assertProjectAccess(ctx, projectId)` on writes and membership-baked read
+   queries — every list/detail/report query is filtered by that project set, and a guessed id
+   returns 404, not data ([17](17-audit-decisions.md) §10.2).
 2. **Report scope.** Engineer report queries are constrained to their project set before
    aggregation — they can never see firm-wide totals.
 3. **Daily report ownership.** Engineers edit a DSR only while it is `DRAFT` and `submitted_by
@@ -105,6 +126,18 @@ These are enforced in the data-access layer, applied to **every** query an engin
    approval). Posting to the ledger for adjustments is admin-gated.
 6. **Finance reads.** Engineers may see budget-vs-actual for their own projects (configurable)
    but never cash flow or firm-wide finance.
+7. **Engineer task management is project-scoped.** `task.manage` (create/assign/edit phases &
+   tasks) runs through the same `assertProjectAccess(ctx, projectId)` guard on the resolved
+   project, so an engineer can only manage tasks on projects they are a member of. The full
+   project team (lead + members, [02](02-data-model.md) §4.1) shares this capability equally —
+   `role_on_project` does not change *what* a member can do, only display and notification
+   targeting.
+8. **QA/QC project scope — granted on request.** A `QA_QC_ENGINEER` sees a project only once an
+   inspection request has added them to `project_members` as `role_on_project = 'INSPECTOR'`
+   ([17](17-audit-decisions.md) §10); the same membership predicate and 404-on-guess apply —
+   there is **no** firm-wide project visibility for QA/QC. Membership grants *scope*, never
+   *capability*: an INSPECTOR can view tasks and view/record inspections, but never manage
+   tasks, create DSRs, or touch finance/inventory.
 
 ## 5. Implementation guidance
 

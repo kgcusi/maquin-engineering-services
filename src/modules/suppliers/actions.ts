@@ -50,6 +50,7 @@ const toSupplierValues = (input: CreateSupplierInput) => ({
   address: orNull(input.address),
   tin: orNull(input.tin),
   paymentTerms: orNull(input.paymentTerms),
+  isActive: input.isActive,
   notes: orNull(input.notes),
 });
 
@@ -105,6 +106,7 @@ export const updateSupplierAction = action(
         address: suppliers.address,
         tin: suppliers.tin,
         paymentTerms: suppliers.paymentTerms,
+        isActive: suppliers.isActive,
         notes: suppliers.notes,
       })
       .from(suppliers)
@@ -120,6 +122,7 @@ export const updateSupplierAction = action(
       address: orNull(input.address),
       tin: orNull(input.tin),
       paymentTerms: orNull(input.paymentTerms),
+      isActive: input.isActive,
       notes: orNull(input.notes),
     };
 
@@ -163,6 +166,65 @@ export const deleteSupplierAction = action(
       entityType: ENTITY,
       entityId: input.id,
       summary: `Deleted supplier ${target.name}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+// Active/inactive toggle — distinct from delete: an inactive supplier stays in the
+// directory but is excluded from selection in other modules. Idempotent (a no-op
+// returns without writing an audit row).
+export const deactivateSupplierAction = action(
+  "supplier.manage",
+  supplierIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: suppliers.id, name: suppliers.name, isActive: suppliers.isActive })
+      .from(suppliers)
+      .where(eq(suppliers.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Supplier not found.");
+    if (!target.isActive) return { id: input.id };
+
+    await tx
+      .update(suppliers)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(suppliers.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "supplier.deactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Deactivated supplier ${target.name}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+export const activateSupplierAction = action(
+  "supplier.manage",
+  supplierIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: suppliers.id, name: suppliers.name, isActive: suppliers.isActive })
+      .from(suppliers)
+      .where(eq(suppliers.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Supplier not found.");
+    if (target.isActive) return { id: input.id };
+
+    await tx
+      .update(suppliers)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(suppliers.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "supplier.reactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Reactivated supplier ${target.name}`,
     });
 
     return { id: input.id };

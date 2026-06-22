@@ -15,6 +15,12 @@ describe("client schema", () => {
     expect(parsed.email).toBe("sales@acme.com");
   });
 
+  it("defaults isActive to true and accepts an explicit boolean", () => {
+    expect(createClientSchema.parse({ name: "Acme" }).isActive).toBe(true);
+    expect(createClientSchema.parse({ name: "Acme", isActive: false }).isActive).toBe(false);
+    expect(createClientSchema.safeParse({ name: "Acme", isActive: "yes" }).success).toBe(false);
+  });
+
   it("document presign validates mime + size", () => {
     const base = { clientId: UUID, filename: "contract.pdf", mime: "application/pdf", size: 1000 };
     expect(presignClientDocumentSchema.safeParse(base).success).toBe(true);

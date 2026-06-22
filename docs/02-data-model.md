@@ -16,6 +16,8 @@ nullable · **idx** indexed.
 erDiagram
     USERS ||--o{ AUDIT_LOGS : performs
     USERS ||--o{ PROJECTS : leads
+    USERS ||--o{ PROJECT_MEMBERS : "member of"
+    PROJECTS ||--o{ PROJECT_MEMBERS : "grants access"
     EMPLOYEES }o--o| USERS : "may link"
 
     CLIENTS ||--o{ PROJECTS : "client of"
@@ -57,45 +59,48 @@ erDiagram
 
 ## 2. Core System
 
-### 2.1 `users`
-The login accounts.
+### 2.1 `user` (Better Auth–owned)
+The login accounts. **Better Auth owns this table** (singular name, **text** ids) along with
+`session`/`account`/`verification`; the password hash lives in **`account.password`** (Better Auth
+scrypt), never here ([17](17-audit-decisions.md) §3). Domain code only extends it with
+`role`/`is_active`/`employee_id`/`deleted_at`. Source of truth: `src/db/schema/auth.ts`.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | text **PK** | Better Auth id (text, **not** uuid); every domain FK references it |
+| email | text **U** **idx** | login identifier |
+| name | text | |
+| email_verified | boolean | |
+| role | text | `ADMIN` / `ENGINEER` (+ hidden `WEBMASTER`, [03](03-roles-and-permissions.md)); plain text, validated in code |
+| is_active | boolean | inactive users can't log in; deactivation also revokes sessions |
+| employee_id | text **N** | optional link to the directory |
+| banned / ban_reason / ban_expires | boolean / text / timestamp **N** | Better Auth admin plugin |
+| created_at / updated_at | timestamp | |
+| deleted_at | timestamp **N** | domain soft-delete (archive) |
+
+### 2.2 Roles & permissions — **static code map, not tables** ([17](17-audit-decisions.md) §1)
+RBAC is code-owned: the `ROLE_PERMISSIONS` map in `src/lib/permissions.ts` (roles `ADMIN`/`ENGINEER`/`QA_QC_ENGINEER`
++ hidden `WEBMASTER` in `src/lib/roles.ts`). There are **no** `permissions`/`role_permissions` DB
+tables in v1.
+
+> The permission **keys** are the stable contract (defined from day one). Graduating to
+> `permissions(id, key, description)` + `role_permissions(role, permission_id)` tables later — when an
+> admin-editable role is needed — is purely additive and needs no guard changes.
+
+### 2.3 `audit_logs` (see [12](12-audit-trail.md)) — source: `src/db/schema/audit-logs.ts`
 
 | Field | Type | Notes |
 |-------|------|-------|
 | id | uuid **PK** | |
-| email | string **U** **idx** | login identifier |
-| password_hash | string | Argon2id/bcrypt; N if using external auth |
-| full_name | string | |
-| role | enum(`ADMIN`,`ENGINEER`) | coarse role; fine-grained perms via `role_permissions` |
-| phone | string **N** | |
-| is_active | boolean | inactive users cannot log in |
-| employee_id | uuid **FK→employees** **N** | optional link to directory |
-| last_login_at | timestamp **N** | |
-| created_at / updated_at | timestamp | |
-| deleted_at | timestamp **N** | soft delete |
-
-### 2.2 `roles` & `permissions` (RBAC backing — see [03](03-roles-and-permissions.md))
-Optional but recommended so roles can grow beyond the two enums.
-
-`permissions(id, key, description)` — e.g. `project.create`, `expense.approve`.
-`role_permissions(role, permission_id)` — which permissions each role has.
-
-> v1 can ship with the two-role enum + a static permission map in code, then graduate to
-> these tables when a third role appears. The permission *keys* should be defined from day one.
-
-### 2.3 `audit_logs` (see [12](12-audit-trail.md))
-
-| Field | Type | Notes |
-|-------|------|-------|
-| id | bigint **PK** | |
-| actor_id | uuid **FK→users** **N** **idx** | null for system actions |
-| action | string **idx** | e.g. `material_request.approved` |
-| entity_type | string **idx** | e.g. `MaterialRequest` |
-| entity_id | uuid **idx** | the affected row id (polymorphic; FK targets are all uuid) |
-| summary | string | human-readable line |
+| actor_id | text **FK→user** **N** **idx** | null for system actions (Better Auth text id) |
+| action | text **idx** | e.g. `project.updated` |
+| entity_type | text **idx** | e.g. `project` |
+| entity_id | text **idx** **N** | affected row id — **text**, not uuid: ids are heterogeneous (Better Auth `user` is text; domain rows are uuid). Refines [17](17-audit-decisions.md) §4 for this column. |
+| summary | text | human-readable line |
 | diff | jsonb **N** | before/after for key fields |
-| ip / user_agent | string **N** | request context |
 | created_at | timestamp **idx** | |
+
+> Append-only — a `BEFORE UPDATE OR DELETE` trigger blocks mutation ([12](12-audit-trail.md)).
 
 ### 2.4 System Settings
 
@@ -139,9 +144,10 @@ Admin-editable configuration store (the only settings that stay editable at runt
 | notes | text **N** | |
 | created_at / updated_at / deleted_at | | |
 
-Children: `client_documents(id, client_id FK, file_id FK, label, created_at)`,
-`client_notes(id, client_id FK, body, created_by FK, created_at)`.
-Project history is derived (projects where `client_id` matches).
+Documents and notes are **polymorphic** ([17](17-audit-decisions.md) §1): `attachments`
+(`entity_type='client'` → `files`) and `notes` (`entity_type='client'`) — no per-entity
+`client_documents`/`client_notes` tables. Project history is derived (projects where `client_id`
+matches).
 
 ### 3.3 `suppliers`
 
@@ -171,16 +177,30 @@ Project history is derived (projects where `client_id` matches).
 | start_date / target_end_date | date **N** | |
 | actual_end_date | date **N** | set on completion |
 | scope_of_work | text **N** | |
-| lead_engineer_id | uuid **FK→users** **idx** | the assigned engineer |
+| lead_engineer_id | uuid **FK→user** **idx** | the *named* lead engineer (display). **Access is granted by `project_members`, not this column** ([17](17-audit-decisions.md) §10.1) |
 | status | enum(`PLANNING`,`ACTIVE`,`ON_HOLD`,`COMPLETED`,`CANCELLED`) **idx** | `pgEnum`; manual lifecycle ([17](17-audit-decisions.md) §9) |
 | defects_liability_until | date **N** | warranty/retention period end; "In Warranty" is derived, not stored |
-| progress_pct | decimal(5,2) | 0–100; derived from phases (or pinned via `progress_is_manual`) |
-| created_by | uuid **FK→users** | |
+| progress_pct | decimal(5,2) | 0–100; **stored, recomputed on write** as the roll-up of phases ([17](17-audit-decisions.md) §10.3) unless pinned |
+| progress_is_manual | boolean (default false) | pins `progress_pct` to a manual value and stops the roll-up |
+| created_by | uuid **FK→user** | |
 | created_at / updated_at / deleted_at | | |
 
-Children: `project_documents(id, project_id FK, file_id FK, label, created_at)`.
-A `project_members` table (project_id, user_id, role_on_project) supports multiple engineers
-per project later; v1 may rely on `lead_engineer_id` only.
+**`project_members`** (the access grant — [17](17-audit-decisions.md) §10.1, ships in Stage 2):
+
+| Field | Type | Notes |
+|-------|------|-------|
+| project_id | uuid **FK→projects** | part of **U(project_id, user_id)** |
+| user_id | uuid **FK→user** **idx** | **idx(user_id, project_id)** backs the engineer-scope predicate |
+| role_on_project | text | `LEAD` / `MEMBER` / `INSPECTOR` — drives lead-vs-member notification targeting ([17](17-audit-decisions.md) §10.8). `INSPECTOR` is added by the (post-Stage-2) inspection request to grant a QA/QC engineer scoped access (§4.5, [17](17-audit-decisions.md) §10) |
+| created_at | timestamp | |
+
+A project carries **one `LEAD` + many `MEMBER`** engineers — the join already models the full
+team, so the Stage 2 UI assigns a lead **plus** member engineers, not a single person.
+`lead_engineer_id` above is only the *named display lead*; capability comes from the user's
+**role**, not from `role_on_project`.
+
+Documents attach via the polymorphic **`attachments`** table (`entity_type = 'project'`,
+[17](17-audit-decisions.md) §1) — not a per-entity `project_documents` table.
 
 ### 4.2 `phases`
 
@@ -191,7 +211,7 @@ per project later; v1 may rely on `lead_engineer_id` only.
 | name | string | |
 | sequence | int | ordering |
 | start_date / target_end_date | date **N** | |
-| progress_pct | decimal(5,2) | derived: weighted avg of tasks |
+| progress_pct | decimal(5,2) | weighted avg of tasks; **stored, recomputed on each task write** ([17](17-audit-decisions.md) §10.3) |
 | remarks | text **N** | |
 
 > Status is **derived, not stored** ([17](17-audit-decisions.md) §9): `deriveProgressStatus`
@@ -204,19 +224,20 @@ per project later; v1 may rely on `lead_engineer_id` only.
 | id | uuid **PK** | |
 | phase_id | uuid **FK→phases** **idx** | |
 | name | string | |
-| assignee_id | uuid **FK→users** **N** | |
+| assignee_id | uuid **FK→user** **N** | |
 | start_date / due_date | date **N** | |
 | completed_date | date **N** | set when progress_pct hits 100 |
 | progress_pct | decimal(5,2) | **the single input** (status derives from it) |
 | is_blocked | boolean | orthogonal overlay, not a status |
 | blocked_reason | text **N** | required when `is_blocked` |
-| is_delayed | boolean | derived: due_date < today and not done |
+| is_delayed | boolean | **stored transition flag**, written only by the daily delay job ([17](17-audit-decisions.md) §10.7); the read path derives the same condition for live display |
 | remarks | text **N** | |
 
 > Status is **derived, not stored** ([17](17-audit-decisions.md) §9): `deriveProgressStatus`
 > (0 → Not Started, 1–99 → In Progress, 100 → Done). Blocked/Delayed are flags shown alongside.
 
-Children: `task_attachments(id, task_id FK, file_id FK, created_at)`.
+Attachments via the polymorphic **`attachments`** table (`entity_type = 'task'`,
+[17](17-audit-decisions.md) §1) — no separate `task_attachments` table.
 
 ### 4.4 Daily Site Reports
 `daily_reports`
@@ -231,19 +252,53 @@ Children: `task_attachments(id, task_id FK, file_id FK, created_at)`.
 | work_accomplished | text | |
 | next_day_plan | text **N** | |
 | progress_note | text **N** | |
-| submitted_by | uuid **FK→users** | |
+| submitted_by | uuid **FK→user** | |
 | submitted_at | timestamp | |
 | status | enum(`DRAFT`,`SUBMITTED`) | |
 
 Children:
 - `dsr_manpower(id, daily_report_id FK, employee_id FK N, trade_code text N, headcount int, hours decimal N)`
 - `dsr_equipment(id, daily_report_id FK, name, quantity, hours decimal N, remarks N)`
-- `dsr_materials(id, daily_report_id FK, item_id FK N, description N, quantity decimal, unit_code text N)` — **drives "used" in issued/used/remaining**
+- `dsr_materials(id **uuid PK — stable**, daily_report_id FK, item_id FK N, description N, quantity decimal, unit_code text N)` — **drives "used" in issued/used/remaining**; the `id` is the Stage-3 ledger's `source_id` for line-level reversal, and edits to a submitted DSR are **new rows** ([17](17-audit-decisions.md) §10.4)
 - `dsr_photos(id, daily_report_id FK, file_id FK, caption N)`
 - `dsr_issues(id, daily_report_id FK, description, severity enum, resolved boolean)`
 
-> `dsr_materials` is the bridge between site reporting and inventory accounting. When an item
-> is linked, it counts toward material *usage*. See [06](06-inventory-ledger.md) §6.
+> `dsr_materials` is the bridge between site reporting and inventory accounting. When an item is
+> linked it counts toward material *usage*; on submit the Stage-3 ledger posts a `−USAGE` row
+> carrying `source_id = dsr_materials.id`, so a re-opened DSR reverses the exact rows
+> ([17](17-audit-decisions.md) §10.4, [06](06-inventory-ledger.md) §6). Stage 2 reserves the link; Stage 3 wires the posting.
+
+### 4.5 Inspections — reserved (post-Stage-2)
+
+> **Not built in Stage 2.** The `QA_QC_ENGINEER` role, the reserved `inspection.*` permission
+> keys, and the `project_members.role_on_project = 'INSPECTOR'` grant ship in Stage 2; the table
+> and flow below ship with the inspection module afterwards ([04](04-modules.md) §5.10a,
+> [17](17-audit-decisions.md) §10). Sketched here so the data model stays forward-consistent —
+> the same "reserve now, wire later" pattern as the DSR→ledger link above.
+
+`inspection_requests`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| ref_code | string **U** | `INS-2026-00042` (server-side counter) |
+| project_id | uuid **FK→projects** **idx** | |
+| task_id | uuid **FK→tasks** **N** | the task being inspected, optional |
+| requested_by | uuid **FK→user** | the engineer raising the request |
+| assigned_to | uuid **FK→user** **idx** | the QA/QC engineer named at request time — drives **both** the `inspection.requested` notification and the `INSPECTOR` membership grant ([17](17-audit-decisions.md) §10) |
+| type | text **N** | kind of inspection (fixed lookup later) |
+| status | enum(`REQUESTED`,`IN_PROGRESS`,`PASSED`,`FAILED`,`REWORK`) | the pass/fail/rework loop |
+| scheduled_for | date **N** | |
+| result_notes | text **N** | |
+| recorded_by | uuid **FK→user** **N** | the QA/QC engineer who recorded the result |
+| recorded_at | timestamp **N** | |
+| created_at / updated_at / deleted_at | | |
+
+Attachments (inspection photos/reports) via the polymorphic **`attachments`** table
+(`entity_type = 'inspection'`). On create, the request inserts a `project_members` row
+(`role_on_project = 'INSPECTOR'`) for `assigned_to` so the existing membership-baked reads let
+the QA/QC engineer open the project; **no request → no membership → 404** (the engineer-scope
+invariant holds).
 
 ---
 
@@ -290,7 +345,8 @@ One active budget per project (versioned via `version`).
 | status | enum(`PENDING`,`APPROVED`,`REJECTED`) **idx** | only APPROVED counts as actual cost |
 | created_by / created_at / updated_at | | |
 
-Children: `expense_attachments(id, expense_id FK, file_id FK, kind enum('RECEIPT','INVOICE','OTHER'))`.
+Receipts/invoices attach via the polymorphic `attachments` table (`entity_type='expense'`; `kind`
+∈ RECEIPT/INVOICE/OTHER; [17](17-audit-decisions.md) §1) — no `expense_attachments` table.
 
 ### 5.4 `cashflow_tx`
 
@@ -325,9 +381,9 @@ A single polymorphic approvals table gates many transaction types.
 | entity_type | string | model name of the subject |
 | entity_id | uuid **idx** | subject row id (polymorphic) |
 | status | enum(`PENDING`,`APPROVED`,`REJECTED`,`CANCELLED`) **idx** | |
-| requested_by | uuid **FK→users** | |
+| requested_by | uuid **FK→user** | |
 | requested_at | timestamp | |
-| decided_by | uuid **FK→users** **N** | |
+| decided_by | uuid **FK→user** **N** | |
 | decided_at | timestamp **N** | |
 | decision_note | text **N** | reason, esp. for rejection |
 
@@ -381,8 +437,8 @@ A single polymorphic approvals table gates many transaction types.
 
 `release_lines(id, release_id FK, mr_line_id FK, item_id FK, qty_released decimal, unit_code text)`
 
-`site_receipts(id, release_id FK, received_by FK, received_at, status enum(OK,SHORT,OVER,DAMAGED), notes N, file_id FK N)`
-with `site_receipt_lines(id, site_receipt_id FK, release_line_id FK, qty_received decimal, shortage_qty decimal, remark N)`
+`site_receipts(id, release_id FK, received_by FK, received_at, notes N, file_id FK N)` — **no stored `OK/SHORT/OVER/DAMAGED` status**; discrepancies are per-line with a neutral reason ([17](17-audit-decisions.md) §6, §9)
+with `site_receipt_lines(id, site_receipt_id FK, release_line_id FK, qty_received decimal, shortage_qty decimal, shortage_reason text N — In transit/Partial/Miscount/Damaged/Lost, remark N)`
 
 > Releasing posts **negative** ledger rows at the source location. Site receiving may post a
 > matching positive row at the site location (if sites are tracked as locations) and flags
@@ -421,7 +477,7 @@ A request/record wrapper around movements that need approval or extra context.
 | source_type | string **idx** | originating model (`StockIn`,`Release`,`InventoryMovement`,`DailyReport`) |
 | source_id | uuid **idx** | originating row id (polymorphic) |
 | project_id | uuid **FK** **N** **idx** | for project material reports |
-| actor_id | uuid **FK→users** | who caused it |
+| actor_id | uuid **FK→user** | who caused it |
 | occurred_at | timestamp **idx** | business time of the movement |
 | created_at | timestamp | system insert time |
 
@@ -447,7 +503,7 @@ Other tables reference `file_id`; join tables (e.g. `dsr_photos`) link many file
 |-------|------|-------|
 | id | uuid **PK** | |
 | event_key | string **idx** | e.g. `material_request.approved` |
-| recipient_id | uuid **FK→users** **idx** | |
+| recipient_id | uuid **FK→user** **idx** | |
 | channel | enum(`EMAIL`,`IN_APP`) | |
 | subject / body | text | rendered content |
 | entity_type / entity_id | string **N** | deep-link target |
@@ -472,8 +528,12 @@ To generate `MR-2026-00042` safely under concurrency.
 
 - FK columns used in filters get indexes (`project_id`, `item_id`, `location_id`, `status`,
   `created_at`).
-- Composite uniques: `daily_reports(project_id, report_date)`,
+- Composite uniques: `daily_reports(project_id, report_date)`, **`project_members(project_id, user_id)`**,
   `item_stock_balances(item_id, location_id)`, `ref_counters(scope, period)`.
+- Engineer scope + delay scan: **`project_members(user_id, project_id)`** (the scope predicate) and a
+  partial **`tasks(due_date) WHERE progress_pct < 100`** for the daily delay job ([17](17-audit-decisions.md) §10).
+- _Reserved (post-Stage-2):_ `inspection_requests(project_id)` and `inspection_requests(assigned_to)`
+  for the QA/QC queue (§4.5) — ship with the inspection module.
 - `stock_ledger`: composite index `(item_id, location_id, occurred_at)` for balance/ledger
   queries; `(source_type, source_id)` for traceability lookups.
 - `CHECK` constraints: `quantity >= 0` on request/movement quantities (signing happens in the

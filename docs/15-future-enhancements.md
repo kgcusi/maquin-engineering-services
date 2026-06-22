@@ -9,7 +9,7 @@ The architecture anticipates growth in specific places:
 
 | Future need | Why v1 already supports it |
 |-------------|----------------------------|
-| **More roles** (Purchaser, Warehouse Keeper, Accountant) | Access is permission-keyed, not hard-coded to two roles ([03](03-roles-and-permissions.md)). Add a role + assign keys. |
+| **More roles** (Purchaser, Warehouse Keeper, Accountant) | Access is permission-keyed, not hard-coded to the shipped role set ([03](03-roles-and-permissions.md)) — `QA_QC_ENGINEER` was the first such addition. Add a role + assign keys. |
 | **Stock reservations** | Ledger + balances design supports `available = on_hand − reserved` without reshaping data ([06](06-inventory-ledger.md) §8). |
 | **New report** | Add a query + export mapper + registry entry; the report shell handles the rest ([09](09-reports-and-export.md) §5). |
 | **New notification** | Add an event key + template + settings row; dispatcher is data-driven ([08](08-notifications.md) §3). |
@@ -26,8 +26,8 @@ The architecture anticipates growth in specific places:
 ### Tier 1 — high value, natural next steps
 - **Stock reservations** so approved-but-unreleased MRs reduce *available* stock and prevent
   over-promising.
-- **In-app notification center** maturity (already modeled): preferences per user, read/unread,
-  mute.
+- **Per-user notification preferences:** the in-app center, bell, and read/unread already ship
+  (Stage 1); post-v1 adds per-user opt-in/out and **mute** per event type, plus richer digests.
 - **Purchase Orders & procurement:** PO → receive-against-PO → three-way match (PO/receipt/
   invoice). Stock-in currently records receipts directly; POs add the "what we ordered" side.
 - **Mobile-optimized DSR capture** (PWA): offline draft + photo capture on site, sync when

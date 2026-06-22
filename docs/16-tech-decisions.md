@@ -57,17 +57,17 @@ canonical record; [01-architecture.md](01-architecture.md) reflects it.
 
 - **Adapter:** Better Auth's Drizzle adapter. It owns `user`, `session`, `account`,
   `verification` tables; the CLI generates them into our Drizzle schema.
-- **Extend the user model** with our fields: `role` (`ADMIN`/`ENGINEER`), `is_active`,
+- **Extend the user model** with our fields: `role` (`ADMIN`/`ENGINEER`/`QA_QC_ENGINEER`), `is_active`,
   `employee_id`. The domain tables in [02](02-data-model.md) that reference `users.id` point at
   Better Auth's user row.
 - **No public signup:** disable `signUp`; provision accounts via the **`admin` plugin**
   (`createUser`, list, ban/unban, set-role, impersonate) — matches [04](04-modules.md) §5.1.
 - **Sessions:** DB sessions; read with `auth.api.getSession({ headers })` inside Server
   Components/Actions to feed the RBAC guard. `is_active = false` ⇒ deny.
-- **Authorization stays ours.** Better Auth = authentication only. Permission keys,
-  `role_permissions`, and the **project-scoping helper** ([03](03-roles-and-permissions.md))
-  remain in our code/DB. Optional security add-ons we get cheaply: **2FA**, **rate limiting**,
-  **account lockout** plugins.
+- **Authorization stays ours.** Better Auth = authentication only. Permission keys, the
+  `ROLE_PERMISSIONS` **static code map** (not a `role_permissions` table — [17](17-audit-decisions.md)
+  §1), and the **project-scoping helper** ([03](03-roles-and-permissions.md)) live in our code.
+  Optional security add-ons we get cheaply: **2FA**, **rate limiting**, **account lockout** plugins.
 - **Caching:** anything that reads the session is **dynamic** (cookies/headers) — keep it out of
   `use cache`. Consistent with [01](01-architecture.md) §8 and the caching plan.
 

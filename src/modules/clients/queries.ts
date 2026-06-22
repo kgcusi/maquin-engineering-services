@@ -20,6 +20,7 @@ export type ClientRow = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  isActive: boolean;
   notes: string | null;
   deletedAt: Date | null;
   createdAt: Date;
@@ -32,14 +33,18 @@ const COLUMNS = {
   phone: clients.phone,
   email: clients.email,
   address: clients.address,
+  isActive: clients.isActive,
   notes: clients.notes,
   deletedAt: clients.deletedAt,
   createdAt: clients.createdAt,
 } as const;
 
-// Active clients only (soft-deleted are hidden), newest first, one page at a
-// time with an optional case-insensitive name/contact/email search. The sibling
-// COUNT(*) over the same WHERE powers the numbered footer.
+// Directory list: every non-deleted client (both active AND inactive), newest
+// first, one page at a time with an optional case-insensitive name/contact/email
+// search — admins manage status here, so inactive rows stay visible with a badge.
+// The sibling COUNT(*) over the same WHERE powers the numbered footer.
+// CONVENTION: selection pickers in other modules must filter active-only with
+// `and(isNull(clients.deletedAt), eq(clients.isActive, true))`.
 export async function listClients(params: DirectoryListParams): Promise<Paginated<ClientRow>> {
   const where = and(
     isNull(clients.deletedAt),

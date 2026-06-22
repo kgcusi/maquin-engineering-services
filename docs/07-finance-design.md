@@ -5,9 +5,9 @@ Three related but distinct concerns: **Budget** (planned cost), **Expenses** (ac
 
 ## 1. Money representation (non-negotiable)
 
-- **Never use floats** for money. Use either:
-  - integer **minor units** (e.g. store `150000` for ₱1,500.00), or
-  - `DECIMAL(14,2)` in the DB with a decimal library in code.
+- **Never use floats** for money. The representation is locked ([17](17-audit-decisions.md) §3):
+  `DECIMAL(14,2)` in the DB + a `Money` value object in code (a Drizzle custom `money` type defined
+  once). **Not** integer minor units — that fork is closed.
 - One **base currency** firm-wide (v1); store the currency code in `app_settings` for display.
 - Centralize all money math in `lib/money.ts` (add, subtract, sum, percentage, format). No ad-hoc
   arithmetic in components or queries.

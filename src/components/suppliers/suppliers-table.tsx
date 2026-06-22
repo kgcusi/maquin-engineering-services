@@ -3,13 +3,25 @@
 import { useState } from "react";
 import type { Route } from "next";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Eye, MoreHorizontal, Pencil, Plus, Trash2, Truck, Upload } from "lucide-react";
+import {
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Trash2,
+  Truck,
+  Upload,
+} from "lucide-react";
 import { Link } from "react-transition-progress/next";
 
 import { DeleteConfirm } from "@/components/directory/delete-confirm";
 import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
 import { DirectoryEmptyState } from "@/components/directory/empty-state";
 import { ImportDialog } from "@/components/directory/import-dialog";
+import { DirectoryStatusBadge } from "@/components/directory/status-badge";
+import { StatusConfirm } from "@/components/directory/status-confirm";
 import { TablePagination } from "@/components/directory/table-pagination";
 import { useListQuery } from "@/components/directory/use-list-query";
 import { Button } from "@/components/ui/button";
@@ -28,7 +40,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
-import { bulkCreateSuppliersAction, deleteSupplierAction } from "@/modules/suppliers/actions";
+import {
+  activateSupplierAction,
+  bulkCreateSuppliersAction,
+  deactivateSupplierAction,
+  deleteSupplierAction,
+} from "@/modules/suppliers/actions";
 import { supplierImportDescriptor } from "@/modules/suppliers/import";
 import type { SupplierRow } from "@/modules/suppliers/queries";
 
@@ -38,6 +55,7 @@ type FormState = { mode: "create" } | { mode: "edit"; supplier: SupplierRow } | 
 
 type TableMeta = {
   onEdit: (s: SupplierRow) => void;
+  onToggleStatus: (s: SupplierRow) => void;
   onDelete: (s: SupplierRow) => void;
   timeZone: string;
 };
@@ -75,6 +93,11 @@ const columns: ColumnDef<SupplierRow>[] = [
     ),
   },
   {
+    accessorKey: "isActive",
+    header: "Status",
+    cell: ({ row }) => <DirectoryStatusBadge isActive={row.original.isActive} />,
+  },
+  {
     accessorKey: "createdAt",
     header: "Added",
     cell: ({ row, table }) => (
@@ -108,6 +131,13 @@ const columns: ColumnDef<SupplierRow>[] = [
                 <Pencil />
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuItem
+                variant={supplier.isActive ? "destructive" : "default"}
+                onClick={() => meta.onToggleStatus(supplier)}
+              >
+                {supplier.isActive ? <PowerOff /> : <Power />}
+                {supplier.isActive ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => meta.onDelete(supplier)}>
                 <Trash2 />
                 Delete
@@ -136,6 +166,7 @@ export function SuppliersTable({
   timeZone: string;
 }) {
   const [form, setForm] = useState<FormState>(null);
+  const [statusTarget, setStatusTarget] = useState<SupplierRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SupplierRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const { q, clearSearch } = useListQuery();
@@ -147,6 +178,7 @@ export function SuppliersTable({
     getCoreRowModel: getCoreRowModel(),
     meta: {
       onEdit: (supplier) => setForm({ mode: "edit", supplier }),
+      onToggleStatus: (supplier) => setStatusTarget(supplier),
       onDelete: (supplier) => setDeleteTarget(supplier),
       timeZone,
     } satisfies TableMeta,
@@ -250,6 +282,18 @@ export function SuppliersTable({
         descriptor={supplierImportDescriptor}
         existingKeys={existingNames}
         commitAction={bulkCreateSuppliersAction}
+      />
+      <StatusConfirm
+        open={statusTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusTarget(null);
+        }}
+        id={statusTarget?.id ?? null}
+        name={statusTarget?.name ?? null}
+        noun="supplier"
+        isActive={statusTarget?.isActive ?? true}
+        activateAction={activateSupplierAction}
+        deactivateAction={deactivateSupplierAction}
       />
       <DeleteConfirm
         open={deleteTarget !== null}

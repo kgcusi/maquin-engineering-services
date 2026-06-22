@@ -33,9 +33,11 @@ These reduce complexity with **zero** user-facing change:
   (`entity_type, entity_id, file_id, label, kind, created_by, created_at`). Files still attach to
   clients, projects, tasks, expenses, DSRs identically. `client_notes` → a generic `notes` table
   with the same polymorphic shape.
-- **Roles/permissions as a static code map**, not DB tables (two roles only — see §2). Permission
-  **keys** stay the contract; graduating to tables later is additive.
-- **One engineer per project** via `lead_engineer_id`; drop `project_members` (additive later).
+- **Roles/permissions as a static code map**, not DB tables (a small fixed role set — see §2 and
+  §10 addendum). Permission **keys** stay the contract; graduating to tables later is additive.
+- ~~**One engineer per project** via `lead_engineer_id`; drop `project_members`~~ — **superseded by
+  §10.1**: `project_members` ships in Stage 2 (multi-person sites; the scope predicate / IDOR guard /
+  `PROJECT:*` resolution are written once, not migrated later).
 
 ### Explicitly KEPT (was a candidate cut, but it's a required feature)
 
@@ -48,7 +50,8 @@ These reduce complexity with **zero** user-facing change:
 
 ## 2. Inventory roles & workflow — Combined + Quick-Issue
 
-Two roles retained (Admin, Engineer). To remove the single-admin bottleneck without adding a role:
+Two roles handle inventory (Admin, Engineer — QA/QC plays no inventory part). To remove the
+single-admin bottleneck without adding an inventory role:
 
 - **Approve-and-Release in one action.** When an admin approves a Material Request, the same screen
   offers "Approve & Release" so it's one trip, not two forms. (The MR still records approval +
@@ -67,8 +70,8 @@ Two roles retained (Admin, Engineer). To remove the single-admin bottleneck with
 | Fork | Decision |
 |------|----------|
 | **Money type** | `DECIMAL(14,2)` in the DB; a `Money` value object in TS. Drizzle custom `money` type defined once. Valuation = `qty(14,3) × cost(14,2)` then **round half-up to 2 dp on the product**. |
-| **Progress %** | **Derived**: phase = weighted avg of its tasks (by task count for v1); project = roll-up of phases. Plus `progress_is_manual boolean default false` to pin a manual value. |
-| **DSR material usage** | **Option A** — post `−USAGE` ledger rows on DSR submit. Add line-level linkage (`dsr_materials.id` carried on the ledger source, or a `ledger_entry_id` back-ref) so editing a submitted DSR reverses the exact rows. No per-project toggle. |
+| **Progress %** | **Derived**: phase = weighted avg of its tasks (by task count for v1); project = roll-up of phases. Plus `progress_is_manual boolean default false` to pin a manual value. **Computed on write — §10.3.** |
+| **DSR material usage** | **Option A** — post `−USAGE` ledger rows on DSR submit. Add line-level linkage (`dsr_materials.id` carried on the ledger source, or a `ledger_entry_id` back-ref) so editing a submitted DSR reverses the exact rows. No per-project toggle. **Link = ledger `source_id`; edits = new rows — §10.4.** |
 | **Sites as locations** | **Yes, non-optional.** Creating a project auto-creates its `SITE` location. RELEASE/RECEIPT/USAGE/RETURN carry `project_id`. Drop all "(if tracked)" hedges. |
 | **API style** | **Server Actions for all mutations** (one `action()` guard → service → transaction). Route handlers only for: file signed-URLs, cron endpoints, the Resend webhook, and report-export downloads. `11-api-design` is re-read as "service operations + the few real HTTP routes." |
 | **Phase statuses** | ~~Own `phase_statuses` lookup~~ — **superseded by §9**: phase status is *derived* from rolled-up progress, not stored. |
@@ -257,4 +260,139 @@ implement `site_receipts` via the §6 neutral shortage **reason picker** rather 
 - **Dropped:** the `04 §5.3` per-list CRUD managers and the deactivate-not-delete / immutable-
   `code` machinery. **Kept:** `app_settings` (timezone, currency, company info) and
   `notification_settings` — those remain admin-editable.
+
+---
+
+## 10. Stage 2 design — Project Tracking (grilled & locked)
+
+> Pre-build design review of Stage 2 (Projects 5.8 / Phases & Tasks 5.9 / DSR 5.10 + project
+> notifications), stress-tested across four lenses — user-friendly, DB-efficient, service-efficient,
+> secure. Same rule as the rest of this doc: **these win** over 00–16 and over the earlier sections
+> flagged below; reconcile into home docs at build time.
+
+1. **Engineer↔project assignment — `project_members` join now.** `project_members(project_id,
+   user_id, role_on_project)` from day one, and the Stage 2 UI assigns a **lead + multiple member
+   engineers** (the full team — see addendum #13). Index
+   `(user_id, project_id)`; unique `(project_id, user_id)`. **Supersedes §1**'s "one engineer per
+   project; drop `project_members`" — multi-person sites are real, and the scope predicate / IDOR
+   defense / `PROJECT:*` resolution then get written **once** instead of migrated later. (04 §5.8)
+
+2. **IDOR enforcement — centralized guard + scoped reads.** One mandatory `assertProjectAccess(ctx,
+   projectId)` on the **resolved** project id (after task→phase→project / dsr→project lookup); read
+   queries **bake the membership predicate in** so a page physically can't fetch unscoped; admins
+   bypass via `project.view.all`; a test asserts every project-scoped module calls it. This makes the
+   `action()` "project scope" hook (§5) real and — critically — covers **reads** too, since today's
+   page guards are role-level only. Postgres RLS held in reserve for the Stage 3 ledger. (03, 11)
+
+3. **Progress roll-up — computed on write, denormalized.** On a task `progress_pct` change, recompute
+   `phases.progress_pct` (avg of its tasks) then `projects.progress_pct` (roll-up of phases) **in the
+   same txn**; **skip when `progress_is_manual`**; `SELECT … FOR UPDATE` the phase then project row to
+   avoid a lost-update race (two engineers can now edit one project); the daily job self-heals drift.
+   Status stays **derived at read, unstored**. Refines §3 / §9-Group A — fixes *where* the derived
+   number lives; invalidate via the existing `project:{id}:progress` tag. (02 §4, 16 §7)
+
+4. **DSR→ledger link — provenance on the ledger.** `stock_ledger.source_type='dsr_material'` +
+   `source_id = dsr_materials.id`; `dsr_materials` gets a **stable uuid PK**; edits to a submitted DSR
+   are **new rows** (new ids → new postings) so the reversal target never moves. **Resolves §3's
+   either/or** in favour of the ledger source over a `ledger_entry_id` back-ref — a back-ref can't
+   express one line→many ledger rows (lots/FIFO) and fights the append-only reversal. Columns reserved
+   in Stage 2; posting wired in Stage 3. (06 §6)
+
+5. **DSR ownership — one per (project, date), collision-safe.** `UNIQUE(project_id, report_date)`,
+   single `submitted_by`. "New DSR" detects today's row **up front** → edit / resume / read-only;
+   **never fill-then-fail** at submit. Others view; admin re-opens (logged). Closes the gap decision 1
+   opened (two engineers, one date); keeps the §9 `daily_reports (DRAFT,SUBMITTED)` enum. (04 §5.10)
+
+6. **DSR resilience — server draft + local buffer, photos upload-on-pick.** Server DRAFT is the source
+   of truth (debounced autosave) with a **localStorage write-through** buffer that replays newer edits
+   on reconnect. **Each photo uploads the moment it's picked** (client-compress → the Stage-1 R2
+   presign pipeline `createPendingUpload`/`confirmAttachment` → attach to the DRAFT), so the form holds
+   **references only** and submit stays tiny. Refines §5 (DSR resilience) + §6 (carry-forward /
+   self-correction) with the persistence + photo-flow specifics. (04 §5.10, 13 §4)
+
+7. **`task.delayed` — stored `is_delayed` as transition state.** Nightly job flips `false→true` for
+   newly-past-due tasks (one txn each), stamps `delayed_notified_at`, and **emits on the transition**;
+   resets `true→false` on completion / due-date extension so a later slip re-notifies. The **read path
+   derives delayed for display only — never writes.** Outbox `idempotencyKey` is the second dedupe
+   layer. Makes "once per *newly* delayed task" idempotent and re-run-safe. Refines §9-Group A. (08,
+   02 §4)
+
+8. **Notification recipients — members minus actor.** `PROJECT:*` resolves to active `project_members`
+   of the payload's project, **excluding the actor** (no "you did X" self-notes); dedup vs
+   `ROLE:ADMIN` via the existing `idempotencyKey`. Emitters add **`projectId` + `actorId`** to the
+   outbox payload; `role_on_project` enables lead-vs-member targeting (`dsr.submitted` → lead;
+   `task.delayed` → all members). Unblocks `resolveRecipients`' `PROJECT:*` branch (returned `[]`
+   pre-Stage-2). (08)
+
+### Stage 2 workflow addendum — client process (grilled & locked, 2026-06)
+
+> A second grilling round against the client's stated workflow ("Admin/GM/OM create projects &
+> tasks → Engineers update/create tasks → request orders to purchasing / request inspection from
+> QA/QC → submit billing docs → Finance check"). These **win** over 00–16 and refine §10 above.
+> Finance/billing steps are Stage 4 and out of scope here.
+
+9. **QA/QC is a distinct role, not a flavor.** Add `QA_QC_ENGINEER` (visible, non-admin).
+   `role_on_project` scopes/targets only — it cannot narrow capabilities — so a tagged ENGINEER
+   can't carry an inspection-only permission set; a separate role is the only honest model. (03 §1–3)
+10. **Role + scoping ship in Stage 2; the inspection module is deferred.** The role, the reserved
+    `inspection.*` keys, and the `INSPECTOR` membership grant land now; the
+    request→inspect→pass/fail→rework module ships post-Stage-2 (04 §5.10a, 02 §4.5) — same
+    "reserve now, wire later" pattern as the DSR→ledger link (§10.4).
+11. **GM/OM → ADMIN; "purchasing" → Material Request flow.** No new roles for either: GM/OM create
+    projects/tasks with ADMIN access, and "request orders to purchasing" is the Stage-3 MR flow
+    (engineer raises → admin approves, 04 §5.16). (03 §1)
+12. **Inspection request grants scoped access — invariant preserved.** Requesting an inspection
+    inserts `project_members(role_on_project='INSPECTOR')` for the named QA/QC engineer, so the
+    existing membership-baked reads let them open the project; no request → no membership → 404.
+    Membership grants *scope*, never *capability*. (03 §4, 02 §4.5)
+13. **Flat multi-engineer teams.** A project carries one `LEAD` + many `MEMBER` engineers, all with
+    equal scoped capability; the lead is a display/notification label. `project_members` is already
+    many-to-many — only §10.1's "single lead" wording opened up; no schema change. (02 §4.1)
+14. **Engineers create/manage tasks (scoped).** `ENGINEER` gains `task.manage` scoped via
+    `assertProjectAccess` to assigned projects, matching the client's "Engrs create task";
+    `task.update.progress` stays the narrower assignee path; QA/QC gets `task.view` only. (03 §3–4)
+15. **Inspection request names + notifies the QA/QC engineer on create.** The `assigned_to` chosen
+    at request time drives both the `INSPECTOR` grant (#12) and an `inspection.requested`
+    notification to that engineer; recording fires `inspection.recorded` to the requester. Needs a
+    new `ROLE:QA_QC_ENGINEER` / direct-user recipient resolver (today's are `ROLE:*` / `PROJECT:*`
+    only) — deferred wiring with the module. (08)
+
+> **Implementer note.** Do **not** add `QA_QC_ENGINEER` to Better Auth `adminRoles` (same rule as
+> WEBMASTER — a novel role there fails validation and breaks the build); it's a non-admin role and
+> `defaultRole` stays `ENGINEER`. Authorization is ours via `ROLE_PERMISSIONS`.
+
+### Carry-overs settled in code (no separate question)
+
+- **Project status state machine** in a **pure domain function** called inside `project.update`
+  (server-side, not just UI): `PLANNING→ACTIVE⇄ON_HOLD→COMPLETED`, `any→CANCELLED`, `COMPLETED`
+  requires `actual_end_date` (mirrors §9-Group A).
+- **Indexes:** `project_members(user_id, project_id)` + unique `(project_id, user_id)`;
+  `projects(status)`, `projects(client_id)`; `phases(project_id, sequence)`; partial
+  `tasks(due_date) WHERE progress_pct < 100` for the delay scan (status is derived, so filter on the
+  number); `daily_reports` unique `(project_id, report_date)`; `dsr_*` children by `daily_report_id`.
+- **Emitters** carry `projectId` + `actorId` in every project-domain outbox payload.
+- Every state change audited; multi-row writes (DSR submit + children; task update + roll-up) in
+  **one transaction** (consistent with Stage 1).
+
+### Stage-1 pre-reqs (do before Stage 2 leans on them) — from the Stage-1 code audit
+
+- [ ] **Reconcile `cookieCache.maxAge` (300s) vs the "60s" contract** — `auth.ts:41` is `300`, but
+      `session.ts`, `rbac.ts`, `users/actions.ts`, and the deactivation-revoke wording all say 60s.
+      Engineer scoping raises the stakes (a removed engineer keeps **read** access for the window).
+      Pick `60` or rewrite the contract to `300`, deliberately.
+- [ ] **Add `error.tsx` + `not-found.tsx`** at the `(app)` route-group level — none exist; the project
+      hub, DSR pages, and IDOR-blocked / missing project ids are where undesigned crashes/404s land.
+- [ ] **Cache the audit `DISTINCT` filter lists** (`listActionOptions` / `listEntityTypeOptions`,
+      `audit/queries.ts`) — uncached scans over an append-only table that Stage 2 multiplies. `use
+      cache` + short `cacheLife`.
+- [ ] **Dispatcher N+1 + actor-exclusion** (`notifications/service.ts`) — load `notification_settings`
+      once per batch, memoize role→recipients, and thread `actorId` (decision 8).
+
+### Acceptance probes (beyond the §14 happy path)
+
+Assign engineers A + B via `project_members`; **A sees the project, unassigned C gets 404 on its id**
+(IDOR proof). A starts today's DSR; **B is routed to edit, not fill-then-fail.** A task goes past due
+→ nightly job → **exactly one** `task.delayed` to admins + members; **re-running the job sends no
+second notice.** Progress rolls up on a task update and **survives a concurrent sibling update.**
+**A receives no self-notification** for their own DSR submit.
 

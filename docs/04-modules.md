@@ -20,7 +20,8 @@ Modules are numbered to match the proposal (§5.1–§5.21).
 
 **Rules.**
 - No public sign-up; admins create users. First admin via seed.
-- Passwords hashed (Argon2id/bcrypt); enforce a minimum strength.
+- Passwords hashed by **Better Auth** (scrypt by default), stored in `account.password` — not on
+  `user` ([17](17-audit-decisions.md) §3); enforce a minimum length (8).
 - Inactive users cannot authenticate; active sessions for a deactivated user are invalidated.
 - Failed-login rate limiting; generic error messages (no "user not found" leak).
 - Session via HTTP-only secure cookie; CSRF protection on mutations.
@@ -136,7 +137,7 @@ appearances are visible on their detail page.
 ### 5.6 Clients
 **Purpose.** Client records with contacts, documents, notes, and project history.
 
-**Key data.** `clients`, `client_documents`, `client_notes`, derived projects.
+**Key data.** `clients`; documents/notes via the polymorphic `attachments`/`notes` tables ([17](17-audit-decisions.md) §1); derived projects.
 
 **Screens.** Client list · Create/edit · Client detail (tabs: Info, Documents, Notes, Projects).
 
@@ -171,49 +172,63 @@ supplier's detail page.
 ### 5.8 Project Management
 **Purpose.** Create and monitor projects.
 
-**Key data.** `projects`, `project_documents`, `project_members`.
+**Key data.** `projects`, `project_members` (the access grant); documents via the polymorphic `attachments` table ([17](17-audit-decisions.md) §1, §10.1).
 
 **Screens.** Projects list (status, progress, client, engineer) · Create/edit · Project
 detail hub (Overview, Phases/Tasks, Daily Reports, Budget, Expenses, Cash Flow, Materials,
 Documents).
 
 **Rules.**
-- Assigning `lead_engineer_id` is what grants the engineer access (scoping rule, [03](03-roles-and-permissions.md) §4).
-- `progress_pct` either rolls up from tasks (recommended) or is set manually — choose one and
-  be consistent; document it on the project.
+- **Access is granted by `project_members`** (an engineer sees a project iff they're a member),
+  enforced at the query level via `assertProjectAccess` + scope-baked reads ([17](17-audit-decisions.md)
+  §10.1–10.2). Assign a **team** — one **lead** (site engineer) plus any number of **member**
+  engineers — through the team picker, which writes `project_members` rows; `lead_engineer_id`
+  only names the primary engineer for display. All members share the same scoped capabilities
+  (the lead is a label, not a power level).
+- `progress_pct` **rolls up from phases, recomputed on write** inside the task-update transaction;
+  set `progress_is_manual` to pin a manual value and stop the roll-up ([17](17-audit-decisions.md) §10.3).
 - Status transitions follow the fixed `projects.status` enum (`PLANNING`/`ACTIVE`/`ON_HOLD`/
-  `COMPLETED`/`CANCELLED`, [17](17-audit-decisions.md) §9); setting `COMPLETED` requires an
-  `actual_end_date`. Warranty/retention is the derived `defects_liability_until`, not a status.
+  `COMPLETED`/`CANCELLED`, [17](17-audit-decisions.md) §9), validated by a pure state-machine
+  function in the `project.update` handler; setting `COMPLETED` requires an `actual_end_date`.
+  Warranty/retention is the derived `defects_liability_until`, not a status.
 - Contract amount and budget are distinct (contract = client price; budget = planned cost).
 
 **Events.** `project.created`, `project.status_changed`, `project.completed`.
 
 **Permissions.** `project.create/update/delete`, `project.view.all` / `project.view.assigned`.
 
-**Done when.** Admin creates a project, assigns an engineer, and that engineer sees it on their
-dashboard while other engineers do not.
+**Done when.** Admin creates a project, assigns a **team of engineers (lead + members)**, and
+those engineers see it on their dashboard while unassigned engineers do not.
 
 ---
 
 ### 5.9 Project Phases & Tasks
 **Purpose.** Break a project into Phases → Tasks to track progress, timeline, delays.
 
-**Key data.** `phases`, `tasks`, `task_attachments`.
+**Key data.** `phases`, `tasks`, task attachments via the polymorphic `attachments` table ([17](17-audit-decisions.md) §1).
 
 **Screens.** Phase/task board or list inside the project (grouped by phase) · Create/edit
 phase · Create/edit task · Task detail (status, dates, progress, remarks, attachments).
 
 **Rules.**
 - Hierarchy: Project → Phase → Task.
-- `is_delayed` is derived: `due_date < today AND status ≠ Done`. Recomputed on read and by a
-  daily job that emits `task.delayed` once per newly-delayed task.
-- Phase progress = weighted/avg of its tasks; project progress rolls up from phases (if using
-  derived progress).
+- **Assigned engineers create, edit, and assign tasks** on their project (`task.manage`, scoped
+  via `assertProjectAccess` — [03](03-roles-and-permissions.md) §4.7); the named lead and member
+  engineers have equal task authority, and admin oversees firm-wide. `task.update.progress`
+  remains the narrower assignee quick-update path.
+- `is_delayed` is a **stored transition flag**: the daily job flips it `false→true` for tasks
+  newly past due (`due_date < today AND progress_pct < 100`), emits `task.delayed` once on that
+  transition, and resets it when the task completes or the due date moves; the read path derives
+  the same condition for live display only ([17](17-audit-decisions.md) §10.7).
+- Phase progress = weighted/avg of its tasks; project progress rolls up from phases — **computed
+  on write**, with `SELECT … FOR UPDATE` on the phase/project rows to avoid lost updates when two
+  engineers edit one project ([17](17-audit-decisions.md) §10.3).
 - Completing all tasks in a phase can auto-complete the phase (configurable).
 
 **Events.** `task.delayed`, `phase.completed`, `phase.critical_update` (admin-flagged).
 
-**Permissions.** `task.manage` (Admin), `task.update.progress` (Engineer on assigned).
+**Permissions.** `task.manage` (Admin + assigned Engineers, scoped), `task.update.progress`
+(assignee quick-update). QA/QC has `task.view` only.
 
 **Done when.** A task past its due date and not done shows as delayed, appears in the delayed-
 tasks dashboard widget, and triggers one delay notification.
@@ -231,15 +246,20 @@ used, photos, issues, next-day plan, progress.
 detail (read view with photo gallery) · "My reports" for engineers.
 
 **Rules.**
-- One submitted DSR per project per date (`UNIQUE(project_id, report_date)`); a second is an
-  edit, not a new row.
-- `DRAFT` is editable by its author; `SUBMITTED` locks editing (re-open is an admin/logged
-  action).
-- `dsr_materials` rows linked to an `item_id` are the **usage** signal for inventory
-  accounting — on submit, the system posts `USAGE` ledger rows (or stages them for confirmation;
-  choose per [06](06-inventory-ledger.md) §6 and document it).
-- Photos go to object storage; enforce type/size limits.
-- Submitting updates the project/phase progress note feed.
+- One DSR per project per date (`UNIQUE(project_id, report_date)`), single `submitted_by`.
+  **"New DSR" detects today's row up front** and routes to edit / resume / read-only — never let
+  an engineer fill the whole form and then fail on the unique constraint ([17](17-audit-decisions.md) §10.5).
+- `DRAFT` is editable by its author; `SUBMITTED` locks editing (re-open is an admin/logged action).
+- **Resilience:** the server `DRAFT` is the source of truth (debounced autosave) with a
+  localStorage write-through buffer that replays on reconnect; each photo **uploads on pick**
+  (client-compressed → the R2 presign pipeline → attached to the draft), so the form holds only
+  references and submit stays small ([17](17-audit-decisions.md) §10.6).
+- `dsr_materials` rows linked to an `item_id` are the **usage** signal for inventory accounting.
+  Stage 2 reserves the link (`source_id = dsr_materials.id`); the Stage-3 ledger posts the
+  `−USAGE` rows and reverses the exact ones on re-open ([17](17-audit-decisions.md) §10.4,
+  [06](06-inventory-ledger.md) §6).
+- Photos go to object storage; enforce mime/size limits (the Stage-1 `files`/`attachments` pipeline).
+- Submitting updates the project/phase progress note feed and emits `dsr.submitted`.
 
 **Events.** `dsr.submitted`, `dsr.issue.flagged` (for high-severity issues).
 
@@ -250,12 +270,46 @@ material for the project and appear in the issued/used/remaining report.
 
 ---
 
+### 5.10a Inspections (QA/QC) — post-Stage-2
+
+> **Deferred.** The `QA_QC_ENGINEER` role, the reserved `inspection.*` keys, and the `INSPECTOR`
+> membership grant ship in **Stage 2**; the module below (screens + flow) ships afterwards
+> ([02](02-data-model.md) §4.5, [17](17-audit-decisions.md) §10).
+
+**Purpose.** Engineers request a quality/QA inspection on a task or project; a QA/QC engineer
+inspects and records a pass/fail result, looping back to rework when it fails.
+
+**Key data.** `inspection_requests` (reserved — [02](02-data-model.md) §4.5); attachments via the
+polymorphic `attachments` table (`entity_type = 'inspection'`).
+
+**Actors.** Engineer requests (`inspection.request`); QA/QC engineer records the result
+(`inspection.record`); Admin oversees (`inspection.view.all`).
+
+**Flow.**
+- Engineer raises a request and **names the QA/QC engineer** (`assigned_to`). On create the
+  system (a) **notifies that QA/QC engineer** (`inspection.requested`) and (b) inserts a
+  `project_members(role_on_project='INSPECTOR')` row so they can open the otherwise-scoped
+  project ([17](17-audit-decisions.md) §10). No request → no membership → 404.
+- The QA/QC engineer inspects and records `PASSED` / `FAILED`; a fail sets `REWORK` and routes
+  back to the task. Recording fires `inspection.recorded` to the requester.
+
+**Events.** `inspection.requested` (→ the named QA/QC engineer), `inspection.recorded` (→ the
+requester) — [08](08-notifications.md).
+
+**Permissions.** `inspection.request` (Engineer, scoped), `inspection.record` (QA/QC, scoped),
+`inspection.view.assigned` / `inspection.view.all`.
+
+**Done when.** An engineer requests an inspection, the named QA/QC engineer is notified and can
+open the project, records a pass/fail, and a fail loops the task back to rework.
+
+---
+
 ## Finance — full detail in [07-finance-design.md](07-finance-design.md)
 
 ### 5.11 Budget & Expenses
 **Purpose.** Planned budget vs. actual expenses per project.
 
-**Key data.** `budgets`, `budget_lines`, `expenses`, `expense_attachments`.
+**Key data.** `budgets`, `budget_lines`, `expenses`; receipts via the polymorphic `attachments` table ([17](17-audit-decisions.md) §1).
 
 **Screens.** Project Budget (categorized lines, total) · Budget revision · Expenses list
 (filter by category/status/date) · Create expense (with receipt upload) · Expense approval
@@ -538,7 +592,8 @@ Full design: [10-dashboard.md](10-dashboard.md).
 | Stage ([14](14-implementation-roadmap.md)) | Modules |
 |-------|---------|
 | 1 — Setup & Core | 5.1, 5.2, 5.3, 5.4 (scaffold), 5.5, 5.6, 5.7 |
-| 2 — Project Tracking | 5.8, 5.9, 5.10, + project notifications |
+| 2 — Project Tracking | 5.8, 5.9, 5.10, + project notifications; `QA_QC_ENGINEER` role + scoping |
 | 3 — Inventory | 5.14, 5.15, 5.16, 5.17, 5.18, 5.19 |
 | 4 — Financial | 5.11, 5.12, 5.13 |
 | 5 — Output | 5.20, 5.21, full 5.4 wiring, testing, polish |
+| Deferred (post-Stage-2) | 5.10a Inspections (QA/QC module — role/keys reserved in Stage 2) |

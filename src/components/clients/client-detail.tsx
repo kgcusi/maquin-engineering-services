@@ -76,7 +76,7 @@ export function ClientDetail({
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">{client.name}</h1>
-            <DirectoryStatusBadge deleted={client.deletedAt !== null} />
+            <DirectoryStatusBadge deleted={client.deletedAt !== null} isActive={client.isActive} />
           </div>
           {client.contactPerson ? (
             <p className="text-muted-foreground text-sm">{client.contactPerson}</p>

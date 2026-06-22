@@ -10,28 +10,48 @@ module specs ([04](04-modules.md)) and ledger design ([06](06-inventory-ledger.m
 
 ```mermaid
 sequenceDiagram
-    actor Admin
-    actor Eng as Engineer
+    actor Admin as Admin / GM / OM
+    actor Eng as Engineer team (lead + members)
+    actor QA as QA/QC Engineer
     Admin->>System: Create project (client, contract, dates, scope)
-    Admin->>System: Assign lead engineer
-    System-->>Eng: Project appears on engineer's dashboard
-    Admin->>System: Create phases & tasks
+    Admin->>System: Assign engineer TEAM (project_members: lead + members)
+    System-->>Eng: Project appears on each member's dashboard
+    Eng->>System: Create / update phases & tasks (task.manage, scoped)
     loop Each site day
         Eng->>System: Submit Daily Site Report
-        System->>System: Update progress, post material USAGE
+        System->>System: Roll up progress (on write); flag DSR materials for Stage-3 usage
         System-->>Admin: notify dsr.submitted
     end
-    Admin->>System: Monitor progress & reports
+    Note over Eng,QA: Deferred (post-Stage-2): inspection module
+    Eng->>System: Request inspection (names a QA/QC engineer)
+    System-->>QA: notify inspection.requested + grant INSPECTOR scope
+    QA->>System: Record result (PASS / FAIL→rework)
+    System-->>Eng: notify inspection.recorded
     System->>System: Daily job flags delayed tasks
     System-->>Admin: notify task.delayed
     Admin->>System: Mark project Completed (sets actual_end_date)
 ```
 
-**Writes:** `projects`, `phases`, `tasks`, `daily_reports`(+children), `stock_ledger`(USAGE),
-`audit_logs`, `notifications`.
+**Client workflow → our roles & stages.** The firm's end-to-end process maps as:
+
+1. _Admin / GM / OM create projects & tasks_ → GM/OM are **`ADMIN`** ([03](03-roles-and-permissions.md) §1);
+   Admin creates the project and assigns the **engineer team** (lead + members).
+2. _Engineers update / create tasks_ → assigned engineers hold **`task.manage`** scoped to their
+   projects (**Stage 2**); the whole team has equal task authority.
+3. _Request orders to purchasing_ → the **Material Request** flow (Engineer raises → Admin
+   approves), **Stage 3** ([04](04-modules.md) §5.16) — "purchasing" is not a separate role.
+4. _Request inspection from QA/QC_ → the **Inspections** module (**deferred, post-Stage-2**,
+   [04](04-modules.md) §5.10a); the request **names + notifies** a QA/QC engineer and grants them
+   scoped `INSPECTOR` access. The `QA_QC_ENGINEER` role + scoping themselves ship in Stage 2.
+5. _Submit/upload billing docs → Finance check_ → **Stage 4** finance, **out of scope** here.
+
+**Writes:** `projects`, `project_members`, `phases`, `tasks`, `daily_reports`(+children),
+`audit_logs`, `notifications`. (The `−USAGE` ledger posting is **Stage 3** — Stage 2 only reserves
+the `dsr_materials` → ledger link, [17](17-audit-decisions.md) §10.4. `inspection_requests` is
+**reserved, post-Stage-2** — [02](02-data-model.md) §4.5.)
 
 **Branches:** task past due → `is_delayed` + `task.delayed`; high-severity DSR issue →
-`dsr.issue.flagged`.
+`dsr.issue.flagged`; inspection result `FAILED` → task `REWORK` (deferred).
 
 ---
 

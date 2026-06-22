@@ -43,6 +43,13 @@ describe("employee schema", () => {
     );
   });
 
+  it("defaults isActive to true and accepts an explicit boolean", () => {
+    const base = { fullName: "J", rateUnit: "DAILY" as const };
+    expect(createEmployeeSchema.parse(base).isActive).toBe(true);
+    expect(createEmployeeSchema.parse({ ...base, isActive: false }).isActive).toBe(false);
+    expect(createEmployeeSchema.safeParse({ ...base, isActive: "yes" }).success).toBe(false);
+  });
+
   it("document confirm requires uuids and accepts an optional name", () => {
     const base = { employeeId: UUID, fileId: UUID };
     expect(confirmEmployeeDocumentSchema.safeParse(base).success).toBe(true);

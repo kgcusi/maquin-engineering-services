@@ -54,6 +54,7 @@ const toEmployeeValues = (input: CreateEmployeeInput) => ({
   address: orNull(input.address),
   rate: toRate(input.rate),
   rateUnit: input.rateUnit,
+  isActive: input.isActive,
   notes: orNull(input.notes),
 });
 
@@ -111,6 +112,7 @@ export const updateEmployeeAction = action(
         address: employees.address,
         rate: employees.rate,
         rateUnit: employees.rateUnit,
+        isActive: employees.isActive,
         notes: employees.notes,
       })
       .from(employees)
@@ -129,6 +131,7 @@ export const updateEmployeeAction = action(
       address: orNull(input.address),
       rate: nextRate,
       rateUnit: input.rateUnit,
+      isActive: input.isActive,
       notes: orNull(input.notes),
     };
 
@@ -177,6 +180,65 @@ export const deleteEmployeeAction = action(
       entityType: ENTITY,
       entityId: input.id,
       summary: `Deleted employee ${target.fullName}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+// Active/inactive toggle — distinct from delete: an inactive employee stays in the
+// directory but is excluded from selection in other modules (DSR manpower, etc.).
+// Idempotent (a no-op returns without writing an audit row).
+export const deactivateEmployeeAction = action(
+  "employee.manage",
+  employeeIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: employees.id, fullName: employees.fullName, isActive: employees.isActive })
+      .from(employees)
+      .where(eq(employees.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Employee not found.");
+    if (!target.isActive) return { id: input.id };
+
+    await tx
+      .update(employees)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(employees.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "employee.deactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Deactivated employee ${target.fullName}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+export const activateEmployeeAction = action(
+  "employee.manage",
+  employeeIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: employees.id, fullName: employees.fullName, isActive: employees.isActive })
+      .from(employees)
+      .where(eq(employees.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Employee not found.");
+    if (target.isActive) return { id: input.id };
+
+    await tx
+      .update(employees)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(employees.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "employee.reactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Reactivated employee ${target.fullName}`,
     });
 
     return { id: input.id };

@@ -59,17 +59,30 @@ and is recorded; every action shows in the audit trail; RBAC matrix tests pass.
 **Modules:** Projects (5.8), Phases & Tasks (5.9), Daily Site Reports (5.10) + project
 notifications.
 
-- [ ] **Projects:** CRUD, client + lead-engineer assignment, documents, status lifecycle,
-      progress model decision (derived vs manual), project detail hub shell.
-- [ ] **Engineer scoping live:** engineers see only assigned projects everywhere.
-- [ ] **Phases & tasks:** hierarchy, dates, statuses, progress roll-up, delay detection +
-      daily `task.delayed` job.
+- [ ] **Projects:** CRUD, client assignment, **engineer team assignment via `project_members`**
+      (one lead + multiple member engineers; the access grant), documents, status lifecycle
+      (validated state machine), **progress roll-up on write** (manual pin via
+      `progress_is_manual`), project detail hub shell.
+- [ ] **Engineer scoping live:** a centralized `assertProjectAccess` guard on writes + membership-
+      baked read queries so engineers see only assigned projects everywhere; a guessed id returns
+      404, not data ([17](17-audit-decisions.md) §10.2).
+- [ ] **Phases & tasks:** hierarchy, dates, derived status, on-write progress roll-up, and the
+      daily `task.delayed` job driven by the stored `is_delayed` transition flag
+      ([17](17-audit-decisions.md) §10.3, §10.7). **Assigned engineers create/manage tasks**
+      (scoped `task.manage`), not just update progress.
 - [ ] **Daily site reports:** multi-section form (weather, work, manpower, equipment, materials,
-      photos, issues, next-day plan), draft/submit, one-per-day constraint, photo gallery.
+      photos, issues, next-day plan), **collision-safe create**, draft autosave + **photo
+      upload-on-pick**, one-per-day constraint, photo gallery ([17](17-audit-decisions.md) §10.5–10.6).
 - [ ] **Notifications wired:** `project.*`, `task.delayed`, `dsr.submitted`,
-      `phase.critical_update`, `dsr.issue.flagged`.
+      `phase.critical_update`, `dsr.issue.flagged` — `PROJECT:*` resolved via `project_members`,
+      **the actor excluded** from recipients ([17](17-audit-decisions.md) §10.8).
+- [ ] **QA/QC role + scoping (not the module):** add the `QA_QC_ENGINEER` role, the reserved
+      `inspection.*` permission keys, and the `project_members.role_on_project = 'INSPECTOR'`
+      value ([03](03-roles-and-permissions.md) §1–4, [17](17-audit-decisions.md) §10). **The
+      inspection module itself (request → inspect → pass/fail → rework) is deferred** — specced
+      at [04](04-modules.md) §5.10a, wired post-Stage-2, like the DSR→ledger stub.
 
-**Done when:** admin creates a project and assigns an engineer who then submits a DSR; delayed
+**Done when:** admin creates a project and assigns a team of engineers, one of whom submits a DSR; delayed
 tasks are flagged and notify; the project hub shows progress, reports, and team. (Material usage
 posting is finalized once inventory exists in Stage 3 — stub the link now.)
 

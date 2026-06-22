@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -17,10 +17,15 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useProgressTransition } from "@/hooks/use-progress-transition";
 import { createSupplierAction, updateSupplierAction } from "@/modules/suppliers/actions";
-import { createSupplierSchema, type CreateSupplierInput } from "@/modules/suppliers/schema";
+import {
+  createSupplierSchema,
+  type CreateSupplierFormValues,
+  type CreateSupplierInput,
+} from "@/modules/suppliers/schema";
 import type { SupplierRow } from "@/modules/suppliers/queries";
 
 function FieldError({ message }: { message?: string }) {
@@ -69,8 +74,9 @@ function SupplierForm({ supplier, onDone }: { supplier: SupplierRow | null; onDo
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
-  } = useForm<CreateSupplierInput>({
+  } = useForm<CreateSupplierFormValues, unknown, CreateSupplierInput>({
     resolver: zodResolver(createSupplierSchema),
     defaultValues: {
       name: supplier?.name ?? "",
@@ -80,6 +86,7 @@ function SupplierForm({ supplier, onDone }: { supplier: SupplierRow | null; onDo
       address: supplier?.address ?? "",
       tin: supplier?.tin ?? "",
       paymentTerms: supplier?.paymentTerms ?? "",
+      isActive: supplier?.isActive ?? true,
       notes: supplier?.notes ?? "",
     },
   });
@@ -169,6 +176,28 @@ function SupplierForm({ supplier, onDone }: { supplier: SupplierRow | null; onDo
         <Textarea id="notes" rows={3} disabled={isPending} {...register("notes")} />
         <FieldError message={errors.notes?.message} />
       </div>
+
+      <Controller
+        control={control}
+        name="isActive"
+        render={({ field }) => (
+          <div className="flex items-center justify-between gap-4 rounded-lg border px-3.5 py-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="isActive">Active</Label>
+              <p className="text-muted-foreground text-xs">
+                Inactive suppliers stay in the directory but can&apos;t be selected in other
+                modules.
+              </p>
+            </div>
+            <Switch
+              id="isActive"
+              checked={field.value}
+              onCheckedChange={(checked) => field.onChange(checked)}
+              disabled={isPending}
+            />
+          </div>
+        )}
+      />
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onDone} disabled={isPending}>

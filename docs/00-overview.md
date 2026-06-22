@@ -42,9 +42,10 @@ manage master data.
 
 **Mental model:** "I run my sites, report what happened, and ask for what I need."
 
-> The role model is intentionally simple (two roles) but built on a **permission layer** so
-> finer roles (e.g. Purchaser, Warehouse Keeper, Accountant) can be added later without
-> rewriting access logic. See [03-roles-and-permissions.md](03-roles-and-permissions.md).
+> The role model is intentionally small (Admin, Engineer, QA/QC Engineer + the hidden Webmaster)
+> but built on a **permission layer** so finer roles (e.g. Purchaser, Warehouse Keeper,
+> Accountant) can be added later without rewriting access logic. See
+> [03-roles-and-permissions.md](03-roles-and-permissions.md).
 
 ## 4. Scope summary
 
@@ -108,8 +109,8 @@ These keep the codebase and database consistent. The build must follow them.
 - **Database:** `snake_case` table and column names, **plural** table names (`material_requests`).
   Primary keys are `id`. Foreign keys are `<entity>_id` (`project_id`). Timestamps are
   `created_at`, `updated_at`. Soft-delete uses `deleted_at` (nullable) where applicable.
-- **Money:** stored as integer **minor units** (e.g. centavos) or `DECIMAL(14,2)` — never
-  floats. See [07-finance-design.md](07-finance-design.md).
+- **Money:** `DECIMAL(14,2)` + a `Money` value object — never floats, never integer minor units
+  (the fork is locked, [17](17-audit-decisions.md) §3). See [07-finance-design.md](07-finance-design.md).
 - **Quantities:** `DECIMAL(14,3)` to allow fractional units (e.g. 2.5 m³).
 - **Fixed values are code-owned (not lookup tables).** Statuses, categories, units, and trades
   are **fixed in code**, split by nature (see [17-audit-decisions.md](17-audit-decisions.md) §9):

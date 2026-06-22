@@ -1,7 +1,15 @@
 # 11 — API Design
 
-Whether implemented as REST route handlers, Next.js server actions, or a mix, these
-conventions hold. The goal: predictable, validated, authorized, attributable endpoints.
+> **Reconciled with [17](17-audit-decisions.md) §3.** All domain mutations are **Server Actions**
+> behind the one `action()` guard (session → is_active → permission → scope → Zod → transaction) —
+> **not** REST endpoints. The resources/verbs below are the **logical service-operation contract**
+> (operation names, inputs, validation, errors, idempotency, pagination) that those actions follow;
+> read any `/api/...` path as an operation name, not a route. The **only real HTTP routes** are:
+> `/api/auth/[...all]` (Better Auth), `/api/cron/*` (CRON_SECRET), the file **signed-URL + confirm**
+> endpoints, the **Resend webhook**, and **export downloads**.
+
+The conventions below hold for that service layer. The goal: predictable, validated, authorized,
+attributable operations.
 
 ## 1. Conventions
 
@@ -20,7 +28,7 @@ conventions hold. The goal: predictable, validated, authorized, attributable end
 
 | Resource | Endpoints | Notes |
 |----------|-----------|-------|
-| auth | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` | session cookie |
+| auth | Better Auth catch-all `/api/auth/[...all]` (login/logout/session) | the one real auth route — not hand-rolled |
 | users | `GET/POST /users`, `PATCH /users/:id`, `POST /users/:id/deactivate` | admin |
 | settings | `GET/PATCH /settings`, `CRUD /settings/lookups/:list` | admin |
 | audit | `GET /audit-logs` | admin, filters |
@@ -85,10 +93,13 @@ conventions hold. The goal: predictable, validated, authorized, attributable end
 
 ## 7. Files
 
-- `POST /files` streams to object storage, returns `{ id }`; the entity then references
-  `file_id`. Enforce mime allowlist + size cap server-side.
-- `GET /files/:id/url` returns a short-lived signed URL; access checked against the requester's
-  scope.
+- Uploads use **R2 presigned PUT** (no server streaming): an action validates mime/size + creates a
+  `PENDING` `files` row and returns a presigned URL; the browser PUTs directly to R2; a **confirm**
+  step HEADs the object before the `files` row is usable and links the `attachments` row
+  (`createPendingUpload` / `confirmAttachment`, [17](17-audit-decisions.md) §4/§5). Mime allowlist +
+  size cap enforced server-side.
+- `GET /files/:id/url` — a short-lived signed **GET** URL (one of the real HTTP routes); access
+  checked against the requester's scope.
 
 ## 8. Security recap (full in [13](13-non-functional.md))
 

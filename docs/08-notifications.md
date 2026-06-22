@@ -53,6 +53,8 @@ flowchart LR
 | `phase.critical_update` | Admin flags a phase critical | Lead engineer |
 | `dsr.submitted` | Daily site report submitted | Admins |
 | `dsr.issue.flagged` | High-severity issue in a DSR | Admins |
+| `inspection.requested` _(post-Stage-2)_ | Engineer requests an inspection | The named QA/QC engineer (`USER:assigned_to`) |
+| `inspection.recorded` _(post-Stage-2)_ | QA/QC records a pass/fail result | Requesting engineer (`USER:requested_by`) |
 | `stock.low` | Item balance ≤ reorder level | Admins (inventory) |
 | `user.created` | New account created | The new user (welcome) |
 | `auth.login.failed` (×N) | Repeated failed logins | Admins (security) |
@@ -69,12 +71,21 @@ Per event key:
 | event_key | the event |
 | enabled | master on/off |
 | channels | EMAIL, IN_APP (one or both) |
-| recipient_rule | `ROLE:ADMIN`, `PROJECT:LEAD_ENGINEER`, `USER:requester`, or explicit list |
+| recipient_rule | `ROLE:ADMIN`, `PROJECT:*` (all `project_members`) / `PROJECT:LEAD`, `USER:<field>`, or explicit list ([17](17-audit-decisions.md) §10.8) |
 | mode | `IMMEDIATE` or `DIGEST` |
 | digest_window | for DIGEST: e.g. daily 7:00 |
 
 Recipient resolution combines role-based and context-based rules (e.g. `task.delayed` → the
-project's lead engineer + all admins), de-duplicated, excluding inactive users.
+project's `project_members` + all admins), de-duplicated and **excluding the actor** who triggered
+the event plus inactive users ([17](17-audit-decisions.md) §10.8). `PROJECT:*` resolves via
+`project_members`; `role_on_project` distinguishes `PROJECT:LEAD` from all members.
+
+> **Reserved (post-Stage-2).** The inspection events reuse the existing `USER:<field>` rule —
+> `inspection.requested` → `USER:assigned_to` (the QA/QC engineer named on the request),
+> `inspection.recorded` → `USER:requested_by`. If the firm later prefers a QA/QC *pool* (anyone
+> can pick up the request) instead of a named assignee, add a `ROLE:QA_QC_ENGINEER` rule then.
+> Note the `INSPECTOR` member added by the request should be **excluded** from routine
+> `project.*` / `dsr.*` traffic to avoid noise ([17](17-audit-decisions.md) §10 addendum #12, #15).
 
 ## 5. Templates (React Email)
 

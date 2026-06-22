@@ -75,7 +75,10 @@ export function SupplierDetail({
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">{supplier.name}</h1>
-            <DirectoryStatusBadge deleted={supplier.deletedAt !== null} />
+            <DirectoryStatusBadge
+              deleted={supplier.deletedAt !== null}
+              isActive={supplier.isActive}
+            />
           </div>
           {supplier.contactPerson ? (
             <p className="text-muted-foreground text-sm">{supplier.contactPerson}</p>

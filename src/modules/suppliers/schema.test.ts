@@ -22,4 +22,10 @@ describe("supplier schema", () => {
     expect(updateSupplierSchema.safeParse({ name: "Acme", id: "not-a-uuid" }).success).toBe(false);
     expect(updateSupplierSchema.safeParse({ name: "Acme", id: UUID }).success).toBe(true);
   });
+
+  it("defaults isActive to true and accepts an explicit boolean", () => {
+    expect(createSupplierSchema.parse({ name: "Acme" }).isActive).toBe(true);
+    expect(createSupplierSchema.parse({ name: "Acme", isActive: false }).isActive).toBe(false);
+    expect(createSupplierSchema.safeParse({ name: "Acme", isActive: "yes" }).success).toBe(false);
+  });
 });

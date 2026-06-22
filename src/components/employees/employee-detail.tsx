@@ -93,7 +93,10 @@ export function EmployeeDetail({
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl font-semibold tracking-tight">{employee.fullName}</h1>
-            <DirectoryStatusBadge deleted={employee.deletedAt !== null} />
+            <DirectoryStatusBadge
+              deleted={employee.deletedAt !== null}
+              isActive={employee.isActive}
+            />
           </div>
           {employee.position ? (
             <p className="text-muted-foreground text-sm">{employee.position}</p>

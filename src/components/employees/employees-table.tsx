@@ -4,12 +4,24 @@ import { useState } from "react";
 import type { Route } from "next";
 import { Link } from "react-transition-progress/next";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Contact, Eye, MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import {
+  Contact,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Trash2,
+  Upload,
+} from "lucide-react";
 
 import { DeleteConfirm } from "@/components/directory/delete-confirm";
 import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
 import { DirectoryEmptyState } from "@/components/directory/empty-state";
 import { ImportDialog } from "@/components/directory/import-dialog";
+import { DirectoryStatusBadge } from "@/components/directory/status-badge";
+import { StatusConfirm } from "@/components/directory/status-confirm";
 import { TablePagination } from "@/components/directory/table-pagination";
 import { useListQuery } from "@/components/directory/use-list-query";
 import { Button } from "@/components/ui/button";
@@ -30,7 +42,12 @@ import {
 import { formatCurrency } from "@/lib/currency";
 import { formatDateTime } from "@/lib/datetime";
 import { rateUnitLabel } from "@/lib/lookups";
-import { bulkCreateEmployeesAction, deleteEmployeeAction } from "@/modules/employees/actions";
+import {
+  activateEmployeeAction,
+  bulkCreateEmployeesAction,
+  deactivateEmployeeAction,
+  deleteEmployeeAction,
+} from "@/modules/employees/actions";
 import { employeeImportDescriptor } from "@/modules/employees/import";
 import type { EmployeeRow } from "@/modules/employees/queries";
 
@@ -40,6 +57,7 @@ type FormState = { mode: "create" } | { mode: "edit"; employee: EmployeeRow } | 
 
 type TableMeta = {
   onEdit: (e: EmployeeRow) => void;
+  onToggleStatus: (e: EmployeeRow) => void;
   onDelete: (e: EmployeeRow) => void;
   timeZone: string;
   currency: string;
@@ -87,6 +105,11 @@ const columns: ColumnDef<EmployeeRow>[] = [
     },
   },
   {
+    accessorKey: "isActive",
+    header: "Status",
+    cell: ({ row }) => <DirectoryStatusBadge isActive={row.original.isActive} />,
+  },
+  {
     accessorKey: "createdAt",
     header: "Added",
     cell: ({ row, table }) => (
@@ -120,6 +143,13 @@ const columns: ColumnDef<EmployeeRow>[] = [
                 <Pencil />
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuItem
+                variant={employee.isActive ? "destructive" : "default"}
+                onClick={() => meta.onToggleStatus(employee)}
+              >
+                {employee.isActive ? <PowerOff /> : <Power />}
+                {employee.isActive ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => meta.onDelete(employee)}>
                 <Trash2 />
                 Delete
@@ -152,6 +182,7 @@ export function EmployeesTable({
   currency: string;
 }) {
   const [form, setForm] = useState<FormState>(null);
+  const [statusTarget, setStatusTarget] = useState<EmployeeRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<EmployeeRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const { q, clearSearch } = useListQuery();
@@ -163,6 +194,7 @@ export function EmployeesTable({
     getCoreRowModel: getCoreRowModel(),
     meta: {
       onEdit: (employee) => setForm({ mode: "edit", employee }),
+      onToggleStatus: (employee) => setStatusTarget(employee),
       onDelete: (employee) => setDeleteTarget(employee),
       timeZone,
       currency,
@@ -268,6 +300,18 @@ export function EmployeesTable({
         descriptor={employeeImportDescriptor}
         existingKeys={existingNames}
         commitAction={bulkCreateEmployeesAction}
+      />
+      <StatusConfirm
+        open={statusTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusTarget(null);
+        }}
+        id={statusTarget?.id ?? null}
+        name={statusTarget?.fullName ?? null}
+        noun="employee"
+        isActive={statusTarget?.isActive ?? true}
+        activateAction={activateEmployeeAction}
+        deactivateAction={deactivateEmployeeAction}
       />
       <DeleteConfirm
         open={deleteTarget !== null}

@@ -40,8 +40,8 @@ Per the proposal §5.2, at least:
 
 ```
 audit_logs(
-  id, actor_id, action, entity_type, entity_id,
-  summary, diff(jsonb), ip, user_agent, created_at
+  id(uuid), actor_id(text → user), action, entity_type, entity_id(text),
+  summary, diff(jsonb), created_at
 )
 ```
 
@@ -58,10 +58,11 @@ audit_logs(
   have an approval without its log (or vice-versa).
 - A small `audit(actorId, action, entity, summary, diff)` helper called from the service layer —
   not scattered through the code.
-- Never expose create/update/delete of audit rows via API or UI. Optionally enforce at the DB
-  level (revoke `UPDATE/DELETE`, or a trigger that blocks them).
-- Capture request context (ip, user agent) where available; never store secrets or full payloads
-  with sensitive data in `diff` (mask passwords, tokens).
+- Never expose create/update/delete of audit rows via API or UI. **Enforced at the DB level** by a
+  `BEFORE UPDATE OR DELETE` trigger on `audit_logs` that raises on any mutation (works with a single
+  app role; [17](17-audit-decisions.md) §5).
+- Never store secrets or full sensitive payloads in `diff` (mask passwords, tokens, API keys). (No
+  `ip`/`user_agent` is captured — the table deliberately omits them.)
 
 ## 5. Viewing
 
@@ -84,4 +85,5 @@ audit_logs(
   action.
 - The per-entity history panel shows a correct, ordered trail for any project, MR, expense, or
   item.
-- Audit rows cannot be edited or deleted through any application path.
+- Audit rows cannot be edited or deleted through **any** path — the DB `BEFORE UPDATE OR DELETE`
+  trigger blocks it, not just the application layer.

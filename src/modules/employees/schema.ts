@@ -29,6 +29,8 @@ export const createEmployeeSchema = z.object({
   address: optionalAddress,
   rate: optionalRate,
   rateUnit: z.enum(RATE_UNIT_CODES),
+  // New records default to active; imports (no column) inherit the default too.
+  isActive: z.boolean().default(true),
   notes: optionalNotes,
 });
 
@@ -37,6 +39,9 @@ export const employeeIdSchema = z.object({ id: z.string().uuid() });
 
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
+// Form-side (resolver INPUT) type: `isActive` is optional here because of its
+// `.default(true)`, so the form generic stays in sync with zodResolver.
+export type CreateEmployeeFormValues = z.input<typeof createEmployeeSchema>;
 
 // ── Employee documents (typed, via the file pipeline) + notes ──────────────────
 const employeeDocs = entityDocumentSchemas("employeeId");

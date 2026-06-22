@@ -54,9 +54,12 @@ const toRow = (r: RawRow): EmployeeRow => ({
   rate: r.rate ? r.rate.toDecimalString() : null,
 });
 
-// Active employees only (soft-deleted are hidden), newest first, one page at a
-// time with an optional name/position/contact search. Sibling COUNT(*) powers
-// the numbered footer.
+// Directory list: every non-deleted employee (both active AND inactive), newest
+// first, one page at a time with an optional name/position/contact search —
+// admins manage status here, so inactive rows stay visible with a badge. Sibling
+// COUNT(*) powers the numbered footer.
+// CONVENTION: selection pickers in other modules must filter active-only with
+// `and(isNull(employees.deletedAt), eq(employees.isActive, true))`.
 export async function listEmployees(params: DirectoryListParams): Promise<Paginated<EmployeeRow>> {
   const where = and(
     isNull(employees.deletedAt),

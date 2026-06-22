@@ -49,6 +49,7 @@ const toClientValues = (input: CreateClientInput) => ({
   phone: orNull(input.phone),
   email: orNull(input.email),
   address: orNull(input.address),
+  isActive: input.isActive,
   notes: orNull(input.notes),
 });
 
@@ -104,6 +105,7 @@ export const updateClientAction = action(
         phone: clients.phone,
         email: clients.email,
         address: clients.address,
+        isActive: clients.isActive,
         notes: clients.notes,
       })
       .from(clients)
@@ -117,6 +119,7 @@ export const updateClientAction = action(
       phone: orNull(input.phone),
       email: orNull(input.email),
       address: orNull(input.address),
+      isActive: input.isActive,
       notes: orNull(input.notes),
     };
 
@@ -159,6 +162,65 @@ export const deleteClientAction = action(
       entityType: ENTITY,
       entityId: input.id,
       summary: `Deleted client ${target.name}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+// Active/inactive toggle — distinct from delete: an inactive client stays in the
+// directory but is excluded from selection in other modules. Idempotent (a no-op
+// returns without writing an audit row).
+export const deactivateClientAction = action(
+  "client.manage",
+  clientIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: clients.id, name: clients.name, isActive: clients.isActive })
+      .from(clients)
+      .where(eq(clients.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Client not found.");
+    if (!target.isActive) return { id: input.id };
+
+    await tx
+      .update(clients)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(clients.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "client.deactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Deactivated client ${target.name}`,
+    });
+
+    return { id: input.id };
+  },
+);
+
+export const activateClientAction = action(
+  "client.manage",
+  clientIdSchema,
+  async (input, { user: actor, tx }) => {
+    const [target] = await tx
+      .select({ id: clients.id, name: clients.name, isActive: clients.isActive })
+      .from(clients)
+      .where(eq(clients.id, input.id))
+      .limit(1);
+    if (!target) throw new ActionError("Client not found.");
+    if (target.isActive) return { id: input.id };
+
+    await tx
+      .update(clients)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(eq(clients.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "client.reactivated",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Reactivated client ${target.name}`,
     });
 
     return { id: input.id };

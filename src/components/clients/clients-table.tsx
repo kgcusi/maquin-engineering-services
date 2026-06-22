@@ -3,13 +3,25 @@
 import { useState } from "react";
 import type { Route } from "next";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Building2, Eye, MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import {
+  Building2,
+  Eye,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { Link } from "react-transition-progress/next";
 
 import { DeleteConfirm } from "@/components/directory/delete-confirm";
 import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
 import { DirectoryEmptyState } from "@/components/directory/empty-state";
 import { ImportDialog } from "@/components/directory/import-dialog";
+import { DirectoryStatusBadge } from "@/components/directory/status-badge";
+import { StatusConfirm } from "@/components/directory/status-confirm";
 import { TablePagination } from "@/components/directory/table-pagination";
 import { useListQuery } from "@/components/directory/use-list-query";
 import { Button } from "@/components/ui/button";
@@ -28,7 +40,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
-import { bulkCreateClientsAction, deleteClientAction } from "@/modules/clients/actions";
+import {
+  activateClientAction,
+  bulkCreateClientsAction,
+  deactivateClientAction,
+  deleteClientAction,
+} from "@/modules/clients/actions";
 import { clientImportDescriptor } from "@/modules/clients/import";
 import type { ClientRow } from "@/modules/clients/queries";
 
@@ -38,6 +55,7 @@ type FormState = { mode: "create" } | { mode: "edit"; client: ClientRow } | null
 
 type TableMeta = {
   onEdit: (c: ClientRow) => void;
+  onToggleStatus: (c: ClientRow) => void;
   onDelete: (c: ClientRow) => void;
   timeZone: string;
 };
@@ -75,6 +93,11 @@ const columns: ColumnDef<ClientRow>[] = [
     ),
   },
   {
+    accessorKey: "isActive",
+    header: "Status",
+    cell: ({ row }) => <DirectoryStatusBadge isActive={row.original.isActive} />,
+  },
+  {
     accessorKey: "createdAt",
     header: "Added",
     cell: ({ row, table }) => (
@@ -108,6 +131,13 @@ const columns: ColumnDef<ClientRow>[] = [
                 <Pencil />
                 Edit
               </DropdownMenuItem>
+              <DropdownMenuItem
+                variant={client.isActive ? "destructive" : "default"}
+                onClick={() => meta.onToggleStatus(client)}
+              >
+                {client.isActive ? <PowerOff /> : <Power />}
+                {client.isActive ? "Deactivate" : "Activate"}
+              </DropdownMenuItem>
               <DropdownMenuItem variant="destructive" onClick={() => meta.onDelete(client)}>
                 <Trash2 />
                 Delete
@@ -136,6 +166,7 @@ export function ClientsTable({
   timeZone: string;
 }) {
   const [form, setForm] = useState<FormState>(null);
+  const [statusTarget, setStatusTarget] = useState<ClientRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClientRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const { q, clearSearch } = useListQuery();
@@ -147,6 +178,7 @@ export function ClientsTable({
     getCoreRowModel: getCoreRowModel(),
     meta: {
       onEdit: (client) => setForm({ mode: "edit", client }),
+      onToggleStatus: (client) => setStatusTarget(client),
       onDelete: (client) => setDeleteTarget(client),
       timeZone,
     } satisfies TableMeta,
@@ -250,6 +282,18 @@ export function ClientsTable({
         descriptor={clientImportDescriptor}
         existingKeys={existingNames}
         commitAction={bulkCreateClientsAction}
+      />
+      <StatusConfirm
+        open={statusTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusTarget(null);
+        }}
+        id={statusTarget?.id ?? null}
+        name={statusTarget?.name ?? null}
+        noun="client"
+        isActive={statusTarget?.isActive ?? true}
+        activateAction={activateClientAction}
+        deactivateAction={deactivateClientAction}
       />
       <DeleteConfirm
         open={deleteTarget !== null}

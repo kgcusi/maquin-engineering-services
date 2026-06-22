@@ -29,7 +29,7 @@ integration gotchas). The layering below keeps most pieces swappable.
 | Tables / forms | **TanStack Table + react-hook-form + Zod** | Data grids + forms sharing Zod with Server Actions |
 | Data layer | **Neon Postgres** (Vercel Marketplace) | Transactions, constraints, views, analytical SQL |
 | ORM | **Drizzle ORM + Drizzle Kit** | Cross-project consistency; SQL-first suits ledger/reports |
-| Auth | **Better Auth** (Drizzle adapter) | Email/password + DB sessions; admin-provisioned; RBAC stays in our DB |
+| Auth | **Better Auth** (Drizzle adapter) | Email/password + DB sessions; admin-provisioned; RBAC is a static code map ([17](17-audit-decisions.md) §1), not DB tables |
 | File storage | **Cloudflare R2** (S3-compatible) | Cross-project consistency; presigned uploads |
 | Email | **Resend + React Email** | Transactional email; type-safe React templates (SMTP endpoint available) |
 | Background jobs | **Vercel Cron + DB outbox/job table** | Notifications, low-stock, delay checks, digests, reconciliation |
@@ -243,7 +243,7 @@ flowchart LR
 
 ## 8. Security baseline (summary — full detail in [13](13-non-functional.md))
 
-- Hashed passwords (Argon2id/bcrypt), HTTP-only secure session cookies, CSRF protection on
+- Passwords hashed by Better Auth (scrypt), HTTP-only secure session cookies, CSRF protection on
   mutations.
 - Authorization checked **server-side on every request** — never rely on hidden UI.
 - Engineers are scoped to their assigned projects at the **query level**, not just the UI.
