@@ -108,3 +108,18 @@ export const quantityColumn = customType<{ data: number; driverData: string }>({
     return Number(value);
   },
 });
+
+// Progress percentage 0–100 with 2 decimals (task/phase/project roll-ups). Stored
+// as numeric(5,2); surfaced as a plain number so the roll-up averages stay
+// arithmetic instead of string-juggling. A CHECK(0..100) is added per-table.
+export const percentColumn = customType<{ data: number; driverData: string }>({
+  dataType() {
+    return "numeric(5, 2)";
+  },
+  toDriver(value) {
+    return value.toString();
+  },
+  fromDriver(value) {
+    return Number(value);
+  },
+});

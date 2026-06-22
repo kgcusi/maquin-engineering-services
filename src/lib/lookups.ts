@@ -106,6 +106,22 @@ export type TradeCode = (typeof TRADES)[number]["code"];
 export const TRADE_CODES = codesOf(TRADES);
 export const tradeLabel = labelLookup(TRADES);
 
+// ── Project membership roles (project_members.role_on_project) — docs/17 §10.13 ─
+// LEAD: one per project — a display/notification label, NOT a power level. MEMBER:
+// many, all with equal scoped capability. INSPECTOR: scoped read access granted
+// when an inspection is requested (the inspection module is deferred; the value
+// ships now). Plain text validated against these codes — NOT a pg enum — per
+// docs/17 §10.1, so membership never narrows a role's capabilities.
+export const PROJECT_MEMBER_ROLES = [
+  { code: "LEAD", label: "Lead Engineer" },
+  { code: "MEMBER", label: "Member" },
+  { code: "INSPECTOR", label: "Inspector" },
+] as const;
+
+export type ProjectMemberRole = (typeof PROJECT_MEMBER_ROLES)[number]["code"];
+export const PROJECT_MEMBER_ROLE_CODES = codesOf(PROJECT_MEMBER_ROLES);
+export const projectMemberRoleLabel = labelLookup(PROJECT_MEMBER_ROLES);
+
 // ── Cost categories — ONE set shared by budget_lines.category_code AND
 // expenses.category_code, so budget-vs-actual reconciles on a single vocabulary. ──
 export const COST_CATEGORIES = [

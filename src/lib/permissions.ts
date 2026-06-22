@@ -41,6 +41,11 @@ export const PERMISSION_KEYS = [
   "dsr.create",
   "dsr.update.own",
   "dsr.view.all",
+  // QA/QC Inspection — role + keys ship Stage 2; the request→inspect→pass/fail
+  // module is deferred (docs/17 §10.10). Reserved so the bundles are stable.
+  "inspection.view",
+  "inspection.request",
+  "inspection.record",
   // Budget
   "budget.view",
   "budget.manage",
@@ -94,10 +99,16 @@ export type Permission = (typeof PERMISSION_KEYS)[number];
 const ENGINEER_PERMISSIONS: Permission[] = [
   "project.view.assigned",
   "task.view",
+  // Assigned engineers create/assign/edit tasks on their projects (docs/17 §10.14),
+  // scoped via assertProjectAccess — not just the narrower progress quick-path.
+  "task.manage",
   "task.update.progress",
   "dsr.view",
   "dsr.create",
   "dsr.update.own",
+  // An assigned engineer requests an inspection (names a QA/QC); the request grants
+  // that inspector INSPECTOR membership. Reserved — the module lands post-Stage-2.
+  "inspection.request",
   "mr.view.assigned",
   "mr.create",
   "receiving.confirm",
@@ -107,6 +118,18 @@ const ENGINEER_PERMISSIONS: Permission[] = [
   "report.export",
   "dashboard.engineer",
   // Every signed-in user sees their own in-app notifications (the topbar bell).
+  "notification.view",
+];
+
+// QA/QC engineer — a non-admin inspection role (docs/17 §10.9). Reads the work it
+// inspects (project/task/DSR, scoped to projects it was granted INSPECTOR
+// membership on) and records inspection outcomes. NOT in Better Auth `adminRoles`.
+const QA_QC_PERMISSIONS: Permission[] = [
+  "project.view.assigned",
+  "task.view",
+  "dsr.view",
+  "inspection.view",
+  "inspection.record",
   "notification.view",
 ];
 
@@ -130,6 +153,7 @@ export const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
   WEBMASTER: new Set(PERMISSION_KEYS),
   ADMIN: new Set(ADMIN_PERMISSIONS),
   ENGINEER: new Set(ENGINEER_PERMISSIONS),
+  QA_QC_ENGINEER: new Set(QA_QC_PERMISSIONS),
 };
 
 export function hasPermission(role: string | null | undefined, permission: Permission): boolean {

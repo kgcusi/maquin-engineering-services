@@ -8,18 +8,22 @@ export const ROLES = {
   WEBMASTER: "WEBMASTER",
   ADMIN: "ADMIN",
   ENGINEER: "ENGINEER",
+  /** Inspection-only field role (docs/17 §10.9). Visible + non-admin like ENGINEER;
+   *  its power comes from ROLE_PERMISSIONS, NOT Better Auth `adminRoles`. */
+  QA_QC_ENGINEER: "QA_QC_ENGINEER",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];
 
 /** Roles an admin may assign through the UI. WEBMASTER is seed/DB-only. */
-export const ASSIGNABLE_ROLES = [ROLES.ADMIN, ROLES.ENGINEER] as const;
+export const ASSIGNABLE_ROLES = [ROLES.ADMIN, ROLES.ENGINEER, ROLES.QA_QC_ENGINEER] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 export const ROLE_LABELS: Record<string, string> = {
   [ROLES.WEBMASTER]: "Webmaster",
   [ROLES.ADMIN]: "Admin",
   [ROLES.ENGINEER]: "Engineer",
+  [ROLES.QA_QC_ENGINEER]: "QA/QC Engineer",
 };
 
 export function roleLabel(role: string | null | undefined): string {

@@ -56,6 +56,39 @@ export function deriveProgressStatus(progressPct: number): ProgressStatus {
   return "IN_PROGRESS";
 }
 
+// ── 3. Daily Site Report workflow (daily_reports.status) — docs/17 §9-Group B ─
+// A STORED two-state lifecycle, pinned here so the pgEnum and the UI share one
+// spelling. DRAFT is the working copy (autosaved, editable by its author);
+// SUBMITTED locks it (only an admin re-opens, audited).
+export const DSR_STATUSES = ["DRAFT", "SUBMITTED"] as const;
+
+export type DsrStatus = (typeof DSR_STATUSES)[number];
+
+export const DSR_STATUS_LABELS: Record<DsrStatus, string> = {
+  DRAFT: "Draft",
+  SUBMITTED: "Submitted",
+};
+
+export function dsrStatusLabel(status: string | null | undefined): string {
+  return status ? (DSR_STATUS_LABELS[status as DsrStatus] ?? status) : "—";
+}
+
+// ── DSR issue severity (dsr_issues.severity) ────────────────────────────────
+// HIGH is the threshold that raises a `dsr.issue.flagged` notification on submit.
+export const DSR_ISSUE_SEVERITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+
+export type DsrIssueSeverity = (typeof DSR_ISSUE_SEVERITIES)[number];
+
+export const DSR_ISSUE_SEVERITY_LABELS: Record<DsrIssueSeverity, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+};
+
+export function dsrIssueSeverityLabel(severity: string | null | undefined): string {
+  return severity ? (DSR_ISSUE_SEVERITY_LABELS[severity as DsrIssueSeverity] ?? severity) : "—";
+}
+
 // ── Warranty (derived project fact, not a status) ───────────────────────────
 // A project is "in warranty" when work is Completed and we're still inside the
 // defects-liability period. Mirrors the `is_delayed` derived-flag pattern.

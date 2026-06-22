@@ -16,3 +16,9 @@ export * from "./notes";
 export * from "./employees";
 export * from "./clients";
 export * from "./suppliers";
+// Stage 2 — Project Tracking (docs/02 §4)
+export * from "./projects";
+export * from "./project-members";
+export * from "./phases";
+export * from "./tasks";
+export * from "./daily-reports";

@@ -1,8 +1,10 @@
-import { and, isNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import { db, type Database } from "@/db/client";
 import { user } from "@/db/schema/auth";
+import { projectMembers } from "@/db/schema/project-members";
+import { projects } from "@/db/schema/projects";
 import {
   PERMISSION_KEYS,
   ROLE_PERMISSIONS,
@@ -62,6 +64,47 @@ export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string
  * generic message so internals never leak to the client.
  */
 export class ActionError extends Error {}
+
+// ── Project scoping (docs/17 §10.2) ─────────────────────────────────────────
+// Engineers see ONLY projects they belong to. Two enforcement points, both here
+// so the rule is written once:
+//   • assertProjectAccess — the WRITE guard. Called on the RESOLVED project id of
+//     every project-scoped mutation (after task→phase→project / dsr→project
+//     lookup). A non-member id throws "Project not found." (the action returns a
+//     clean error; a guessed id is indistinguishable from a missing one — no IDOR
+//     leak). Admins bypass via `project.view.all`.
+//   • projectAccessWhere — the READ predicate. AND it into any `projects` list so
+//     the query physically can't return projects the user isn't a member of.
+
+type Executor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+export async function assertProjectAccess(
+  exec: Executor,
+  args: { userId: string; role: string | null; projectId: string },
+): Promise<void> {
+  if (hasPermission(args.role, "project.view.all")) return;
+  const [row] = await exec
+    .select({ id: projectMembers.id })
+    .from(projectMembers)
+    .where(
+      and(eq(projectMembers.projectId, args.projectId), eq(projectMembers.userId, args.userId)),
+    )
+    .limit(1);
+  if (!row) throw new ActionError("Project not found.");
+}
+
+/** Membership predicate for project list reads — `undefined` (no restriction) for
+ *  admins/webmaster (`project.view.all`), else `projects.id IN (my memberships)`. */
+export function projectAccessWhere(role: string | null, userId: string): SQL | undefined {
+  if (hasPermission(role, "project.view.all")) return undefined;
+  return inArray(
+    projects.id,
+    db
+      .select({ id: projectMembers.projectId })
+      .from(projectMembers)
+      .where(eq(projectMembers.userId, userId)),
+  );
+}
 
 // Shared session → account → permission → validate pipeline. Fails CLOSED if the
 // session read throws (e.g. DB unreachable).
