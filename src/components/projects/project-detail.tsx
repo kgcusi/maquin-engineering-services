@@ -3,18 +3,12 @@
 import { useState } from "react";
 import type { Route } from "next";
 import { Link } from "react-transition-progress/next";
-import {
-  ArrowLeft,
-  CalendarClock,
-  ClipboardList,
-  ListTree,
-  Pencil,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowLeft, CalendarClock, ClipboardList, Pencil, ShieldCheck } from "lucide-react";
 
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import { ProjectStatusControl } from "@/components/projects/project-status-control";
+import { ProjectTasks } from "@/components/projects/project-tasks";
 import { ProjectTeam } from "@/components/projects/project-team";
 import { AttachmentList } from "@/components/files/attachment-list";
 import { FileUploader } from "@/components/files/file-uploader";
@@ -33,6 +27,7 @@ import {
   presignProjectDocumentAction,
 } from "@/modules/projects/actions";
 import type { ProjectDetail as ProjectDetailType } from "@/modules/projects/queries";
+import type { PhaseWithTasks } from "@/modules/projects/tasks/queries";
 import type { AttachmentRow } from "@/modules/files/service";
 import type { NoteRow } from "@/modules/notes/service";
 import type { Paginated } from "@/modules/shared/list-params";
@@ -64,7 +59,7 @@ function SoonPanel({
   title,
   description,
 }: {
-  icon: typeof ListTree;
+  icon: typeof ClipboardList;
   title: string;
   description: string;
 }) {
@@ -90,6 +85,10 @@ export function ProjectDetail({
   canManage,
   clients,
   engineers,
+  phases,
+  assignees,
+  canManageTasks,
+  viewerId,
 }: {
   project: ProjectDetailType;
   documents: Paginated<AttachmentRow>;
@@ -99,6 +98,10 @@ export function ProjectDetail({
   canManage: boolean;
   clients: { id: string; name: string }[];
   engineers: { id: string; name: string }[];
+  phases: PhaseWithTasks[];
+  assignees: { id: string; name: string }[];
+  canManageTasks: boolean;
+  viewerId: string;
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
@@ -108,9 +111,10 @@ export function ProjectDetail({
 
   const contract = project.contractAmount ? formatCurrency(project.contractAmount, currency) : null;
 
+  const phaseCount = phases.length;
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
-    { key: "phases", label: "Phases & Tasks" },
+    { key: "phases", label: `Phases & Tasks${phaseCount ? ` (${phaseCount})` : ""}` },
     { key: "reports", label: "Daily Reports" },
     { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
     { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
@@ -215,10 +219,13 @@ export function ProjectDetail({
       ) : null}
 
       {tab === "phases" ? (
-        <SoonPanel
-          icon={ListTree}
-          title="Phases and tasks arrive with the next update"
-          description="The work breakdown — phases, tasks, and progress roll-up — lands here in the next slice."
+        <ProjectTasks
+          projectId={id}
+          phases={phases}
+          assignees={assignees}
+          canManage={canManageTasks}
+          viewerId={viewerId}
+          timeZone={timeZone}
         />
       ) : null}
 

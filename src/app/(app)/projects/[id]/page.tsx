@@ -12,6 +12,7 @@ import {
   listEngineerOptions,
   type ProjectViewer,
 } from "@/modules/projects/queries";
+import { listPhasesWithTasks, listProjectAssigneeOptions } from "@/modules/projects/tasks/queries";
 import { getSettings } from "@/modules/settings/queries";
 import { pageParam } from "@/modules/shared/list-params";
 
@@ -28,20 +29,24 @@ export default async function ProjectDetailPage({
   const role = (session.user as { role?: string | null }).role ?? null;
   const viewer: ProjectViewer = { id: session.user.id, role };
   const canManage = hasPermission(role, "project.update");
+  const canManageTasks = hasPermission(role, "task.manage");
 
   const { id } = await params;
   const sp = await searchParams;
   const docsPage = pageParam(sp.docsPage);
   const notesPage = pageParam(sp.notesPage);
 
-  const [project, documents, notes, settings, clients, engineers] = await Promise.all([
-    getProjectDetail(viewer, id),
-    getProjectDocuments(id, docsPage),
-    getProjectNotes(id, notesPage),
-    getSettings(),
-    canManage ? listClientOptions() : Promise.resolve([]),
-    canManage ? listEngineerOptions() : Promise.resolve([]),
-  ]);
+  const [project, documents, notes, settings, clients, engineers, phases, assignees] =
+    await Promise.all([
+      getProjectDetail(viewer, id),
+      getProjectDocuments(id, docsPage),
+      getProjectNotes(id, notesPage),
+      getSettings(),
+      canManage ? listClientOptions() : Promise.resolve([]),
+      canManage ? listEngineerOptions() : Promise.resolve([]),
+      listPhasesWithTasks(id),
+      listProjectAssigneeOptions(id),
+    ]);
   if (!project) notFound();
 
   return (
@@ -54,6 +59,10 @@ export default async function ProjectDetailPage({
       canManage={canManage}
       clients={clients}
       engineers={engineers}
+      phases={phases}
+      assignees={assignees}
+      canManageTasks={canManageTasks}
+      viewerId={viewer.id}
     />
   );
 }
