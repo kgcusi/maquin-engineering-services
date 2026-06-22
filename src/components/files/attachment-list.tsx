@@ -33,7 +33,8 @@ type Props = {
   paramKey: string;
   timeZone: string;
   onDownload: (attachmentId: string) => Promise<Result<{ url: string; filename: string }>>;
-  onDelete: (attachmentId: string) => Promise<Result<unknown>>;
+  /** Omit to render the list read-only (download only, no delete control). */
+  onDelete?: (attachmentId: string) => Promise<Result<unknown>>;
 };
 
 export function AttachmentList({
@@ -62,7 +63,7 @@ export function AttachmentList({
   }
 
   function confirmDelete() {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !onDelete) return;
     const id = deleteTarget.attachmentId;
     start(async () => {
       const res = await onDelete(id);
@@ -117,16 +118,18 @@ export function AttachmentList({
                 >
                   <Download />
                 </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Remove ${title}`}
-                  disabled={isPending}
-                  onClick={() => setDeleteTarget(doc)}
-                >
-                  <Trash2 className="text-destructive" />
-                </Button>
+                {onDelete ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${title}`}
+                    disabled={isPending}
+                    onClick={() => setDeleteTarget(doc)}
+                  >
+                    <Trash2 className="text-destructive" />
+                  </Button>
+                ) : null}
               </li>
             );
           })}

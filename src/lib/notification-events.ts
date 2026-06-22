@@ -23,6 +23,18 @@ export type NotificationEventDef = {
 };
 
 export const NOTIFICATION_EVENTS = {
+  "project.created": {
+    label: "Project created",
+    defaultRecipientRule: "ROLE:ADMIN",
+    defaultChannels: ["IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
+  "project.status_changed": {
+    label: "Project status changed",
+    defaultRecipientRule: "ROLE:ADMIN",
+    defaultChannels: ["IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
   "material_request.submitted": {
     label: "Material request submitted",
     defaultRecipientRule: "ROLE:ADMIN",
