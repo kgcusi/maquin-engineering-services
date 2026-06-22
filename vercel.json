@@ -4,6 +4,14 @@
     {
       "path": "/api/cron/notifications",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/tasks-delayed",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/files-reaper",
+      "schedule": "0 2 * * *"
     }
   ]
 }
