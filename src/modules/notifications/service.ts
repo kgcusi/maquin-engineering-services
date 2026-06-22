@@ -6,6 +6,7 @@ import { user } from "@/db/schema/auth";
 import { notifications } from "@/db/schema/notifications";
 import { notificationSettings } from "@/db/schema/notification-settings";
 import { outbox } from "@/db/schema/outbox";
+import { projectMembers } from "@/db/schema/project-members";
 import NotificationEmail from "@/emails/notification-email";
 import { audit } from "@/lib/audit";
 import { sendEmail } from "@/lib/mailer";
@@ -33,10 +34,12 @@ type Recipient = { id: string; email: string; name: string };
 
 const ACTIVE_USER = or(isNull(user.isActive), eq(user.isActive, true));
 
-// Resolve a recipient_rule against the directory. ROLE:* and USER:<field> work
-// today; PROJECT:* needs the projects table (Stage 2), so it yields no recipients
-// for now rather than erroring. The hidden WEBMASTER never matches ROLE:ADMIN
-// (role is matched exactly), preserving the hidden-superuser invariant.
+// Resolve a recipient_rule against the directory. ROLE:* / USER:<field> /
+// PROJECT:<selector> are all supported. PROJECT:* resolves the payload's
+// `projectId` via project_members (Stage 2): a "LEAD" selector → the lead only,
+// anything else → the full team (LEAD + MEMBER). The hidden WEBMASTER never
+// matches ROLE:ADMIN (role is matched exactly), preserving the hidden-superuser
+// invariant. The actor is excluded by the caller (no "you did X" self-notes).
 async function resolveRecipients(
   db: Database,
   rule: string | null,
@@ -60,10 +63,24 @@ async function resolveRecipients(
       .where(and(eq(user.id, userId), isNull(user.deletedAt), ACTIVE_USER));
   }
 
-  // PROJECT:* and NONE — nothing to resolve yet.
   if (parsed.kind === "PROJECT") {
-    console.warn(`[notifications] recipient rule "${rule}" not resolvable until Stage 2`);
+    const projectId = payload.projectId;
+    if (typeof projectId !== "string" || !projectId) return [];
+    const roles = parsed.selector.includes("LEAD") ? ["LEAD"] : ["LEAD", "MEMBER"];
+    return db
+      .select({ id: user.id, email: user.email, name: user.name })
+      .from(projectMembers)
+      .innerJoin(user, eq(projectMembers.userId, user.id))
+      .where(
+        and(
+          eq(projectMembers.projectId, projectId),
+          inArray(projectMembers.roleOnProject, roles),
+          isNull(user.deletedAt),
+          ACTIVE_USER,
+        ),
+      );
   }
+
   return [];
 }
 
@@ -90,9 +107,12 @@ export async function dispatchOutbox(
 
       const channels = settings?.enabled ? parseChannels(settings.channels) : [];
       const payload = (event.payload ?? {}) as Record<string, unknown>;
-      const recipients = channels.length
+      const resolved = channels.length
         ? await resolveRecipients(db, settings.recipientRule, payload)
         : [];
+      // Never notify the actor about their own action (docs/17 §10.8).
+      const actorId = typeof payload.actorId === "string" ? payload.actorId : null;
+      const recipients = actorId ? resolved.filter((r) => r.id !== actorId) : resolved;
 
       const label =
         NOTIFICATION_EVENTS[event.eventType as keyof typeof NOTIFICATION_EVENTS]?.label ??

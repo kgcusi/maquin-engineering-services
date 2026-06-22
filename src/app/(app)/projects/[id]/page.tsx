@@ -12,6 +12,7 @@ import {
   listEngineerOptions,
   type ProjectViewer,
 } from "@/modules/projects/queries";
+import { listProjectDsrs } from "@/modules/projects/dsr/queries";
 import { listPhasesWithTasks, listProjectAssigneeOptions } from "@/modules/projects/tasks/queries";
 import { getSettings } from "@/modules/settings/queries";
 import { pageParam } from "@/modules/shared/list-params";
@@ -30,17 +31,21 @@ export default async function ProjectDetailPage({
   const viewer: ProjectViewer = { id: session.user.id, role };
   const canManage = hasPermission(role, "project.update");
   const canManageTasks = hasPermission(role, "task.manage");
+  const canCreateDsr = hasPermission(role, "dsr.create");
 
   const { id } = await params;
   const sp = await searchParams;
   const docsPage = pageParam(sp.docsPage);
   const notesPage = pageParam(sp.notesPage);
+  const dsrPage = pageParam(sp.dsrPage);
+  const initialTab = typeof sp.tab === "string" ? sp.tab : undefined;
 
-  const [project, documents, notes, settings, clients, engineers, phases, assignees] =
+  const [project, documents, notes, reports, settings, clients, engineers, phases, assignees] =
     await Promise.all([
       getProjectDetail(viewer, id),
       getProjectDocuments(id, docsPage),
       getProjectNotes(id, notesPage),
+      listProjectDsrs(id, { page: dsrPage }),
       getSettings(),
       canManage ? listClientOptions() : Promise.resolve([]),
       canManage ? listEngineerOptions() : Promise.resolve([]),
@@ -54,15 +59,18 @@ export default async function ProjectDetailPage({
       project={project}
       documents={documents}
       notes={notes}
+      reports={reports}
       timeZone={settings.timezone}
       currency={settings.currency}
       canManage={canManage}
+      canCreateDsr={canCreateDsr}
       clients={clients}
       engineers={engineers}
       phases={phases}
       assignees={assignees}
       canManageTasks={canManageTasks}
       viewerId={viewer.id}
+      initialTab={initialTab}
     />
   );
 }

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import type { Route } from "next";
 import { Link } from "react-transition-progress/next";
-import { ArrowLeft, CalendarClock, ClipboardList, Pencil, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CalendarClock, Pencil, ShieldCheck } from "lucide-react";
 
+import { ProjectDsrList } from "@/components/projects/project-dsr-list";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import { ProjectStatusControl } from "@/components/projects/project-status-control";
@@ -27,12 +28,16 @@ import {
   presignProjectDocumentAction,
 } from "@/modules/projects/actions";
 import type { ProjectDetail as ProjectDetailType } from "@/modules/projects/queries";
+import type { DsrListRow } from "@/modules/projects/dsr/queries";
 import type { PhaseWithTasks } from "@/modules/projects/tasks/queries";
 import type { AttachmentRow } from "@/modules/files/service";
 import type { NoteRow } from "@/modules/notes/service";
 import type { Paginated } from "@/modules/shared/list-params";
 
 type Tab = "overview" | "phases" | "reports" | "documents" | "notes";
+
+const TABS: Tab[] = ["overview", "phases", "reports", "documents", "notes"];
+const isTab = (value: string | undefined): value is Tab => TABS.includes(value as Tab);
 
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
@@ -53,58 +58,41 @@ function Field({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-// Designed "this slice ships later" panel — no bare "Coming soon" string.
-function SoonPanel({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: typeof ClipboardList;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex max-w-2xl flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
-      <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
-        <Icon className="size-5" />
-      </span>
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{title}</p>
-        <p className="text-muted-foreground mx-auto max-w-sm text-sm">{description}</p>
-      </div>
-    </div>
-  );
-}
-
 export function ProjectDetail({
   project,
   documents,
   notes,
+  reports,
   timeZone,
   currency,
   canManage,
+  canCreateDsr,
   clients,
   engineers,
   phases,
   assignees,
   canManageTasks,
   viewerId,
+  initialTab,
 }: {
   project: ProjectDetailType;
   documents: Paginated<AttachmentRow>;
   notes: Paginated<NoteRow>;
+  reports: Paginated<DsrListRow>;
   timeZone: string;
   currency: string;
   canManage: boolean;
+  canCreateDsr: boolean;
   clients: { id: string; name: string }[];
   engineers: { id: string; name: string }[];
   phases: PhaseWithTasks[];
   assignees: { id: string; name: string }[];
   canManageTasks: boolean;
   viewerId: string;
+  initialTab?: string;
 }) {
   const [editOpen, setEditOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "overview");
   const id = project.id;
   const status = project.status as ProjectStatus;
   const warranty = isInWarranty(status, parseDefects(project.defectsLiabilityUntil), new Date());
@@ -115,7 +103,7 @@ export function ProjectDetail({
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "phases", label: `Phases & Tasks${phaseCount ? ` (${phaseCount})` : ""}` },
-    { key: "reports", label: "Daily Reports" },
+    { key: "reports", label: `Daily Reports${reports.total ? ` (${reports.total})` : ""}` },
     { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
     { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
   ];
@@ -230,10 +218,11 @@ export function ProjectDetail({
       ) : null}
 
       {tab === "reports" ? (
-        <SoonPanel
-          icon={ClipboardList}
-          title="Daily site reports are on the way"
-          description="Field engineers will file daily reports — manpower, weather, and issues — from this tab soon."
+        <ProjectDsrList
+          projectId={id}
+          reports={reports}
+          timeZone={timeZone}
+          canCreate={canCreateDsr}
         />
       ) : null}
 
