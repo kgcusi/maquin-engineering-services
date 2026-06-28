@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
-import { Bell, BellRing, Check, Inbox } from "lucide-react";
+import { Bell, BellRing, Check, ChevronRight, Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 import { useProgressTransition } from "@/hooks/use-progress-transition";
@@ -38,16 +40,21 @@ export function NotificationBellMenu({
   items: BellNotification[];
 }) {
   const router = useRouter();
+  const [open, setOpen] = useState(false);
   const [isPending, start] = useProgressTransition();
 
-  function markOne(id: string) {
+  function handleClick(n: BellNotification) {
+    setOpen(false);
     start(async () => {
-      const res = await markNotificationReadAction({ id });
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
+      if (!n.read) {
+        const res = await markNotificationReadAction({ id: n.id });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
       }
-      router.refresh();
+      if (n.link) router.push(n.link as Route);
+      else router.refresh();
     });
   }
 
@@ -63,7 +70,7 @@ export function NotificationBellMenu({
   }
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
           <button
@@ -112,11 +119,12 @@ export function NotificationBellMenu({
               <li key={n.id}>
                 <button
                   type="button"
-                  disabled={isPending || n.read}
-                  onClick={() => markOne(n.id)}
+                  disabled={isPending || (n.read && !n.link)}
+                  onClick={() => handleClick(n)}
                   className={cn(
                     "hover:bg-accent flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors",
                     !n.read && "bg-primary/5",
+                    n.link && "cursor-pointer",
                   )}
                 >
                   <span
@@ -135,6 +143,12 @@ export function NotificationBellMenu({
                       {timeAgo(n.createdAt)}
                     </span>
                   </span>
+                  {n.link ? (
+                    <ChevronRight
+                      aria-hidden
+                      className="text-muted-foreground/50 mt-1 size-4 shrink-0"
+                    />
+                  ) : null}
                 </button>
               </li>
             ))}

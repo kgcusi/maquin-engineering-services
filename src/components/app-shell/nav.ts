@@ -11,6 +11,8 @@ import {
   Contact,
   ScrollText,
   Settings,
+  LayoutTemplate,
+  ListChecks,
   type LucideIcon,
 } from "lucide-react";
 
@@ -74,6 +76,20 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: "Users", href: "/users", icon: Users, requires: "user.view", live: true },
       { title: "Audit log", href: "/audit", icon: ScrollText, requires: "audit.view", live: true },
       {
+        title: "Templates",
+        href: "/templates" as Route,
+        icon: LayoutTemplate,
+        requires: "template.view",
+        live: true,
+      },
+      {
+        title: "Checklists",
+        href: "/checklists" as Route,
+        icon: ListChecks,
+        requires: "checklist.view",
+        live: true,
+      },
+      {
         title: "Settings",
         href: "/settings",
         icon: Settings,
@@ -85,7 +101,14 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Projects",
     items: [
-      { title: "Projects", href: "/projects", icon: FolderKanban, requires: "project.view.all" },
+      {
+        title: "Projects",
+        href: "/projects",
+        icon: FolderKanban,
+        // Admins (view.all) AND assigned engineers / QA-QC (view.assigned) see it.
+        requires: ["project.view.all", "project.view.assigned"],
+        live: true,
+      },
     ],
   },
   {

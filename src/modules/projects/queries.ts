@@ -196,6 +196,30 @@ export function listEngineerOptions(): Promise<Option[]> {
     .orderBy(asc(user.name));
 }
 
+export type ClientProjectRow = {
+  id: string;
+  refCode: string;
+  name: string;
+  status: string;
+  progressPct: number;
+};
+
+// Projects belonging to one client — for the client detail "Projects" tab. Admin
+// context (the client pages are `client.view`-gated), so no membership scoping.
+export async function listClientProjects(clientId: string): Promise<ClientProjectRow[]> {
+  return db
+    .select({
+      id: projects.id,
+      refCode: projects.refCode,
+      name: projects.name,
+      status: projects.status,
+      progressPct: projects.progressPct,
+    })
+    .from(projects)
+    .where(and(eq(projects.clientId, clientId), isNull(projects.deletedAt)))
+    .orderBy(desc(projects.createdAt));
+}
+
 // ── Detail-tab panels over the polymorphic tables (entity_type = "project") ─────
 export const PROJECT_ENTITY = "project" as const;
 export const getProjectDocuments = (projectId: string, page: number) =>

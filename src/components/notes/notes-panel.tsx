@@ -89,7 +89,7 @@ export function NotesPanel({
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
-          placeholder="Add a note about this client…"
+          placeholder="Add a note…"
           disabled={isPending}
           aria-label="New note"
         />

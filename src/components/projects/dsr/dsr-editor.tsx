@@ -24,6 +24,7 @@ import {
   Trash2,
   TriangleAlert,
   Truck,
+  Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,11 +53,14 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useProgressTransition } from "@/hooks/use-progress-transition";
+import { formatDateTime } from "@/lib/datetime";
 import { TRADES, UNITS } from "@/lib/lookups";
 import { DSR_ISSUE_SEVERITIES, dsrIssueSeverityLabel } from "@/lib/statuses";
 import { cn } from "@/lib/utils";
 import {
+  deleteDsrAction,
   reopenDsrAction,
+  reviewDsrAction,
   saveDsrDraftAction,
   submitDsrAction,
 } from "@/modules/projects/dsr/actions";
@@ -282,17 +286,30 @@ export function DsrEditor({
   timeZone,
   canEdit,
   canReopen,
+  canReview,
+  canDelete,
 }: {
   dsr: DsrEditorData;
   photos: Paginated<AttachmentRow>;
   timeZone: string;
   canEdit: boolean;
   canReopen: boolean;
+  canReview: boolean;
+  canDelete: boolean;
 }) {
   if (!canEdit) {
-    return <DsrReadOnly dsr={dsr} photos={photos} timeZone={timeZone} canReopen={canReopen} />;
+    return (
+      <DsrReadOnly
+        dsr={dsr}
+        photos={photos}
+        timeZone={timeZone}
+        canReopen={canReopen}
+        canReview={canReview}
+        canDelete={canDelete}
+      />
+    );
   }
-  return <DsrForm dsr={dsr} photos={photos} timeZone={timeZone} />;
+  return <DsrForm dsr={dsr} photos={photos} timeZone={timeZone} canDelete={canDelete} />;
 }
 
 // ── Editable form (DRAFT, author or admin) ────────────────────────────────────
@@ -306,10 +323,12 @@ function DsrForm({
   dsr,
   photos,
   timeZone,
+  canDelete,
 }: {
   dsr: DsrEditorData;
   photos: Paginated<AttachmentRow>;
   timeZone: string;
+  canDelete: boolean;
 }) {
   const router = useRouter();
   const { register, control, watch, getValues } = useForm<FormValues>({
@@ -330,6 +349,9 @@ function DsrForm({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlight = useRef(false);
   const queued = useRef(false);
+  // True once there's an edit not yet known-persisted. The single signal the
+  // navigate-away guards read; cleared only when a save lands with nothing queued.
+  const dirty = useRef(false);
 
   const runSave = useCallback(async () => {
     if (inFlight.current) {
@@ -348,10 +370,13 @@ function DsrForm({
     if (queued.current) {
       queued.current = false;
       void runSave();
+    } else if (result.ok) {
+      dirty.current = false;
     }
   }, [dsr.id, getValues]);
 
   const scheduleSave = useCallback(() => {
+    dirty.current = true;
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => void runSave(), AUTOSAVE_DELAY);
   }, [runSave]);
@@ -368,11 +393,28 @@ function DsrForm({
     return () => sub.unsubscribe();
   }, [watch, scheduleSave]);
 
+  // Warn on a full-page exit (reload / close tab / external URL) with unsaved work.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirty.current || inFlight.current) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (timer.current) clearTimeout(timer.current);
+      // In-app navigation unmounts us before the debounce fires — flush the last
+      // edit best-effort (fire-and-forget; no setState on an unmounted component).
+      if (dirty.current && !inFlight.current) {
+        void saveDsrDraftAction(toPayload(dsr.id, getValues()));
+      }
     };
-  }, []);
+  }, [dsr.id, getValues]);
 
   // Adding/removing a field-array row mutates outside the input change stream, so
   // nudge a save explicitly after structural edits.
@@ -390,6 +432,9 @@ function DsrForm({
         return;
       }
       toast.success("Daily report submitted.");
+      // The draft was just flushed and the report is now SUBMITTED — clear the flag
+      // so the unmount flush doesn't fire a doomed save against a locked report.
+      dirty.current = false;
       router.push(`/projects/${dsr.projectId}?tab=reports`);
       router.refresh();
     });
@@ -398,6 +443,8 @@ function DsrForm({
   return (
     <div className="space-y-5">
       <SaveIndicator state={saveState} timeZone={timeZone} />
+
+      <ReviewBanner dsr={dsr} timeZone={timeZone} />
 
       {/* Header card */}
       <div className="space-y-4 rounded-lg border p-4">
@@ -677,7 +724,7 @@ function DsrForm({
       </Section>
 
       {/* Submit */}
-      <div className="bg-background/80 sticky bottom-0 -mx-1 flex flex-col gap-2 border-t pt-4 pb-1 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+      <div className="bg-background/80 sticky bottom-0 -mx-1 flex flex-col gap-2 border-t px-4 pt-4 pb-1 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <p className="text-muted-foreground text-xs">
           Autosaves as you type. Submit when the day&apos;s work is logged.
         </p>
@@ -704,8 +751,8 @@ function DsrForm({
           <AlertDialogHeader>
             <AlertDialogTitle>Submit this daily report?</AlertDialogTitle>
             <AlertDialogDescription>
-              Once submitted, only an admin can re-open it for changes. Make sure today&apos;s log
-              is complete.
+              It goes to an admin for review. You or an admin can re-open it for changes if needed.
+              Make sure today&apos;s log is complete.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -722,6 +769,12 @@ function DsrForm({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {canDelete ? (
+        <div className="flex justify-end border-t pt-4">
+          <DeleteDsrControl dsrId={dsr.id} projectId={dsr.projectId} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -963,25 +1016,32 @@ function DsrReadOnly({
   photos,
   timeZone,
   canReopen,
+  canReview,
+  canDelete,
 }: {
   dsr: DsrEditorData;
   photos: Paginated<AttachmentRow>;
   timeZone: string;
   canReopen: boolean;
+  canReview: boolean;
+  canDelete: boolean;
 }) {
   return (
     <div className="space-y-5">
+      <ReviewBanner dsr={dsr} timeZone={timeZone} />
+
       {dsr.status === "SUBMITTED" ? (
         <div className="text-muted-foreground bg-muted/30 flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-xs">
           <Lock className="size-4 shrink-0" />
-          This report is submitted and locked. Only an admin can re-open it for changes.
+          This report is submitted and awaiting review. The author or an admin can re-open it for
+          changes.
         </div>
-      ) : (
+      ) : dsr.status === "DRAFT" ? (
         <div className="text-muted-foreground bg-muted/30 flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-xs">
           <Lock className="size-4 shrink-0" />
           You can view this draft, but only its author can edit it.
         </div>
-      )}
+      ) : null}
 
       <div className="space-y-4 rounded-lg border p-4">
         <ReadField label="Weather" value={dsr.weather} />
@@ -1099,8 +1159,232 @@ function DsrReadOnly({
         <DsrPhotoPanel dsrId={dsr.id} photos={photos} timeZone={timeZone} canEdit={false} />
       </Section>
 
-      {canReopen ? <ReopenControl dsrId={dsr.id} /> : null}
+      {canReview ? <ReviewControl dsrId={dsr.id} /> : null}
+
+      {canReopen || canDelete ? (
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+          {canDelete ? <DeleteDsrControl dsrId={dsr.id} projectId={dsr.projectId} /> : null}
+          {canReopen ? <ReopenControl dsrId={dsr.id} /> : null}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+// Approved-or-sent-back feedback callout, shown above the report in both the editable
+// and read-only views. A fresh draft (never reviewed) renders nothing.
+function ReviewBanner({ dsr, timeZone }: { dsr: DsrEditorData; timeZone: string }) {
+  const approved = dsr.status === "APPROVED";
+  const sentBack = dsr.status === "DRAFT" && Boolean(dsr.reviewRemarks?.trim());
+  if (!approved && !sentBack) return null;
+
+  const who = dsr.reviewedByName ?? "A reviewer";
+  const when = dsr.reviewedAt ? formatDateTime(dsr.reviewedAt, timeZone, "datetime") : null;
+
+  return (
+    <div
+      className={cn(
+        "space-y-1.5 rounded-lg border px-3.5 py-3 text-sm",
+        approved
+          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300",
+      )}
+    >
+      <p className="flex flex-wrap items-center gap-x-2 font-medium">
+        {approved ? (
+          <CheckCircle2 className="size-4 shrink-0" />
+        ) : (
+          <Undo2 className="size-4 shrink-0" />
+        )}
+        {approved ? `Approved by ${who}` : `Sent back for revision by ${who}`}
+        {when ? <span className="text-xs font-normal opacity-80">· {when}</span> : null}
+      </p>
+      {dsr.reviewRemarks?.trim() ? (
+        <p className="pl-6 text-[0.8125rem] leading-relaxed whitespace-pre-wrap">
+          {dsr.reviewRemarks}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// Reviewer (admin) decision on a submitted report: approve, or send back with a note.
+function ReviewControl({ dsrId }: { dsrId: string }) {
+  const router = useRouter();
+  const [mode, setMode] = useState<null | "APPROVED" | "SENT_BACK">(null);
+  const [remarks, setRemarks] = useState("");
+  const [error, setError] = useState<string | undefined>();
+  const [isPending, start] = useProgressTransition();
+
+  function close() {
+    if (isPending) return;
+    setMode(null);
+    setRemarks("");
+    setError(undefined);
+  }
+
+  function confirm() {
+    if (!mode) return;
+    if (mode === "SENT_BACK" && !remarks.trim()) {
+      setError("Add remarks so the author knows what to fix");
+      return;
+    }
+    start(async () => {
+      const result = await reviewDsrAction({
+        id: dsrId,
+        outcome: mode,
+        remarks: remarks.trim() || undefined,
+      });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success(mode === "APPROVED" ? "Report approved." : "Report sent back for revision.");
+      setMode(null);
+      setRemarks("");
+      router.refresh();
+    });
+  }
+
+  const sendingBack = mode === "SENT_BACK";
+
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="space-y-0.5">
+        <p className="text-sm font-medium">Review this report</p>
+        <p className="text-muted-foreground text-xs">
+          Approve it, or send it back with a note for the author to revise.
+        </p>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Button onClick={() => setMode("APPROVED")} className="sm:flex-1">
+          <CheckCircle2 /> Approve
+        </Button>
+        <Button variant="outline" onClick={() => setMode("SENT_BACK")} className="sm:flex-1">
+          <Undo2 /> Send back
+        </Button>
+      </div>
+
+      <AlertDialog
+        open={mode !== null}
+        onOpenChange={(next) => {
+          if (!next) close();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {sendingBack ? "Send back for revision?" : "Approve this report?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {sendingBack
+                ? "It returns to the author as a draft with your note; they revise and re-submit."
+                : "It will be marked approved. Add an optional note for the record."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="dsr-review-remarks" required={sendingBack}>
+              {sendingBack ? "What needs fixing?" : "Remarks (optional)"}
+            </Label>
+            <Textarea
+              id="dsr-review-remarks"
+              rows={3}
+              value={remarks}
+              disabled={isPending}
+              onChange={(e) => {
+                setRemarks(e.target.value);
+                if (error) setError(undefined);
+              }}
+              placeholder={sendingBack ? "Explain what to correct…" : "Any notes on the approval…"}
+              aria-invalid={error ? true : undefined}
+            />
+            {error ? (
+              <p role="alert" className="text-destructive text-xs">
+                {error}
+              </p>
+            ) : null}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+            <Button
+              variant={sendingBack ? "destructive" : "default"}
+              onClick={confirm}
+              disabled={isPending}
+            >
+              {isPending ? (
+                <>
+                  <Loader2 className="animate-spin" /> Saving…
+                </>
+              ) : sendingBack ? (
+                "Send back"
+              ) : (
+                "Approve"
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// Soft-delete a report (author's own draft, or any report for an admin).
+function DeleteDsrControl({ dsrId, projectId }: { dsrId: string; projectId: string }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [isPending, start] = useProgressTransition();
+
+  function confirm() {
+    start(async () => {
+      const result = await deleteDsrAction({ id: dsrId });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Daily report deleted.");
+      router.push(`/projects/${projectId}?tab=reports`);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        className="text-destructive hover:text-destructive"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 /> Delete report
+      </Button>
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          if (!next && !isPending) setOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this daily report?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the report and everything logged on it — manpower, equipment, materials,
+              issues and photos. This can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirm} disabled={isPending}>
+              {isPending ? (
+                <>
+                  <Loader2 className="animate-spin" /> Deleting…
+                </>
+              ) : (
+                "Delete report"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -1123,7 +1407,7 @@ function ReopenControl({ dsrId }: { dsrId: string }) {
   }
 
   return (
-    <div className="flex justify-end border-t pt-4">
+    <>
       <Button variant="outline" onClick={() => setOpen(true)}>
         <RotateCcw /> Re-open report
       </Button>
@@ -1155,6 +1439,6 @@ function ReopenControl({ dsrId }: { dsrId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

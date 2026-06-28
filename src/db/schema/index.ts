@@ -22,3 +22,7 @@ export * from "./project-members";
 export * from "./phases";
 export * from "./tasks";
 export * from "./daily-reports";
+export * from "./inspections";
+export * from "./inspection-checklists";
+export * from "./inspection-attempts";
+export * from "./project-templates";

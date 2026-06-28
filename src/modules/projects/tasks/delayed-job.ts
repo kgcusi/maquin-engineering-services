@@ -6,25 +6,23 @@ import { projects } from "@/db/schema/projects";
 import { tasks } from "@/db/schema/tasks";
 import { emitEvent } from "@/lib/events";
 
-import { todayISO } from "../dsr/domain";
-
 // Nightly delay scan (docs/17 §10.7). Flips is_delayed false→true for newly
-// past-due open tasks and emits ONE `task.delayed` per transition — idempotent and
-// re-run-safe via the stored transition flag (re-checked under FOR UPDATE) plus the
-// outbox idempotencyKey. The read path derives delayed for display and never writes
-// the flag; the task-edit path resets it on completion/re-date so a later slip
-// re-notifies.
+// past-due open tasks and emits ONE `task.delayed` per transition. The dedup is the
+// stored transition flag itself (re-checked under FOR UPDATE), so a re-run can't
+// double-flag/notify. The read path derives delayed for display and never writes the
+// flag; the task-edit path resets it on completion/re-date so a later slip re-notifies.
 //
-// The emitted payload carries NO entityId on purpose: the dispatcher then scopes the
-// idempotencyKey on the unique outbox row id, so a fresh slip of the same task (after
-// a reset) is a distinct notification rather than being deduped against the prior one.
+// The emitted payload carries NO entityId on purpose: the dispatcher then builds its
+// per-recipient idempotency key from the unique outbox row id, so a fresh slip of the
+// same task (after a reset) is a distinct notification, not deduped against the prior.
 const SCAN_LIMIT = 500;
 
+// `today` is the firm-local date (YYYY-MM-DD) — passed in by the cron route so the
+// "past due" boundary matches the firm's calendar, not the server's UTC clock.
 export async function runDelayedTaskScan(
   db: Database,
+  today: string,
 ): Promise<{ scanned: number; flagged: number }> {
-  const today = todayISO();
-
   const candidates = await db
     .select({ id: tasks.id, name: tasks.name, projectId: phases.projectId })
     .from(tasks)
@@ -37,7 +35,7 @@ export async function runDelayedTaskScan(
         isNull(projects.deletedAt),
         eq(tasks.isDelayed, false),
         sql`${tasks.progressPct} < 100`,
-        sql`${tasks.dueDate} is not null and ${tasks.dueDate} < ${today}`,
+        sql`${tasks.targetEndDate} is not null and ${tasks.targetEndDate} < ${today}`,
       ),
     )
     .limit(SCAN_LIMIT);

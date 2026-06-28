@@ -38,7 +38,9 @@ function parseISODate(s: string): { y: number; m: number; d: number } | null {
 }
 
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-const monthFmt = new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" });
+const monthNames = Array.from({ length: 12 }, (_, m) =>
+  new Intl.DateTimeFormat(undefined, { month: "long" }).format(new Date(2000, m, 1)),
+);
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
   month: "short",
@@ -92,9 +94,22 @@ function CalendarGrid({
     });
   }
 
+  const minYear = min ? Number(min.slice(0, 4)) : now.getFullYear() - 10;
+  const maxYear = max ? Number(max.slice(0, 4)) : now.getFullYear() + 10;
+  const lowYear = Math.min(minYear, view.y, sel?.y ?? view.y);
+  const highYear = Math.max(maxYear, view.y, sel?.y ?? view.y);
+  const years: number[] = [];
+  for (let y = highYear; y >= lowYear; y--) years.push(y);
+
+  const selectClass = cn(
+    "hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/50",
+    "cursor-pointer appearance-none rounded-md bg-transparent py-1 pr-1 pl-1.5",
+    "text-sm font-medium tabular-nums outline-none transition-colors focus-visible:ring-2",
+  );
+
   return (
     <div className="w-64">
-      <div className="flex items-center justify-between pb-2">
+      <div className="flex items-center gap-1 pb-2">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -104,7 +119,32 @@ function CalendarGrid({
         >
           <ChevronLeft />
         </Button>
-        <span className="text-sm font-medium">{monthFmt.format(new Date(view.y, view.m, 1))}</span>
+        <div className="flex flex-1 items-center justify-center gap-0.5">
+          <select
+            aria-label="Month"
+            value={view.m}
+            onChange={(e) => setView((v) => ({ ...v, m: Number(e.target.value) }))}
+            className={selectClass}
+          >
+            {monthNames.map((name, i) => (
+              <option key={name} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Year"
+            value={view.y}
+            onChange={(e) => setView((v) => ({ ...v, y: Number(e.target.value) }))}
+            className={selectClass}
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
         <Button
           variant="ghost"
           size="icon-sm"

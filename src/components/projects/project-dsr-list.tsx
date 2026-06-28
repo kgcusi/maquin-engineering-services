@@ -103,7 +103,9 @@ export function ProjectDsrList({
 
       <ul className="divide-border divide-y overflow-hidden rounded-lg border">
         {reports.rows.map((dsr) => {
-          const submitted = dsr.status === "SUBMITTED";
+          // A draft is the only "not yet filed" state; SUBMITTED and APPROVED are both
+          // on the record (the badge tells them apart).
+          const filed = dsr.status !== "DRAFT";
           return (
             <li key={dsr.id}>
               <Link
@@ -113,7 +115,7 @@ export function ProjectDsrList({
                 <span
                   className={cn(
                     "flex size-9 shrink-0 items-center justify-center rounded-md",
-                    submitted
+                    filed
                       ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
                       : "bg-muted text-muted-foreground",
                   )}
@@ -132,7 +134,7 @@ export function ProjectDsrList({
                     </span>
                   </div>
                   <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                    {submitted && dsr.submittedByName ? (
+                    {filed && dsr.submittedByName ? (
                       <>
                         <span>{dsr.submittedByName}</span>
                         {dsr.submittedAt ? (

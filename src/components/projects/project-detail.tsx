@@ -6,17 +6,15 @@ import { Link } from "react-transition-progress/next";
 import { ArrowLeft, CalendarClock, Pencil, ShieldCheck } from "lucide-react";
 
 import { ProjectDsrList } from "@/components/projects/project-dsr-list";
+import { ProjectInspectionList } from "@/components/projects/project-inspection-list";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
-import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
-import { ProjectStatusControl } from "@/components/projects/project-status-control";
+import { ProjectOverview } from "@/components/projects/overview/project-overview";
 import { ProjectTasks } from "@/components/projects/project-tasks";
-import { ProjectTeam } from "@/components/projects/project-team";
 import { AttachmentList } from "@/components/files/attachment-list";
 import { FileUploader } from "@/components/files/file-uploader";
 import { NotesPanel } from "@/components/notes/notes-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatCurrency } from "@/lib/currency";
 import { isInWarranty, type ProjectStatus } from "@/lib/statuses";
 import { cn } from "@/lib/utils";
 import {
@@ -28,35 +26,21 @@ import {
   presignProjectDocumentAction,
 } from "@/modules/projects/actions";
 import type { ProjectDetail as ProjectDetailType } from "@/modules/projects/queries";
-import type { DsrListRow } from "@/modules/projects/dsr/queries";
+import type { DsrListRow, DsrStatusCounts } from "@/modules/projects/dsr/queries";
+import type {
+  InspectionListRow,
+  InspectionStatusCounts,
+} from "@/modules/projects/inspections/queries";
 import type { PhaseWithTasks } from "@/modules/projects/tasks/queries";
+import type { TemplateTree } from "@/modules/projects/templates/queries";
 import type { AttachmentRow } from "@/modules/files/service";
 import type { NoteRow } from "@/modules/notes/service";
 import type { Paginated } from "@/modules/shared/list-params";
 
-type Tab = "overview" | "phases" | "reports" | "documents" | "notes";
+type Tab = "overview" | "phases" | "reports" | "inspections" | "documents" | "notes";
 
-const TABS: Tab[] = ["overview", "phases", "reports", "documents", "notes"];
+const TABS: Tab[] = ["overview", "phases", "reports", "inspections", "documents", "notes"];
 const isTab = (value: string | undefined): value is Tab => TABS.includes(value as Tab);
-
-function formatDate(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(`${iso}T00:00:00`);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(d);
-}
-
-function Field({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="space-y-0.5">
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="text-sm">
-        {value?.trim() ? value : <span className="text-muted-foreground">—</span>}
-      </dd>
-    </div>
-  );
-}
 
 export function ProjectDetail({
   project,
@@ -72,8 +56,17 @@ export function ProjectDetail({
   phases,
   assignees,
   canManageTasks,
+  templates,
+  inspections,
+  inspectors,
+  canViewInspections,
+  canRequestInspection,
+  canRecordInspection,
+  canRecordAnyInspection,
   viewerId,
   initialTab,
+  dsrSummary,
+  inspectionSummary,
 }: {
   project: ProjectDetailType;
   documents: Paginated<AttachmentRow>;
@@ -88,8 +81,17 @@ export function ProjectDetail({
   phases: PhaseWithTasks[];
   assignees: { id: string; name: string }[];
   canManageTasks: boolean;
+  templates: TemplateTree[];
+  inspections: Paginated<InspectionListRow>;
+  inspectors: { id: string; name: string }[];
+  canViewInspections: boolean;
+  canRequestInspection: boolean;
+  canRecordInspection: boolean;
+  canRecordAnyInspection: boolean;
   viewerId: string;
   initialTab?: string;
+  dsrSummary: DsrStatusCounts;
+  inspectionSummary: InspectionStatusCounts;
 }) {
   const [editOpen, setEditOpen] = useState(false);
   const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "overview");
@@ -97,13 +99,19 @@ export function ProjectDetail({
   const status = project.status as ProjectStatus;
   const warranty = isInWarranty(status, parseDefects(project.defectsLiabilityUntil), new Date());
 
-  const contract = project.contractAmount ? formatCurrency(project.contractAmount, currency) : null;
-
   const phaseCount = phases.length;
   const tabs: { key: Tab; label: string }[] = [
     { key: "overview", label: "Overview" },
     { key: "phases", label: `Phases & Tasks${phaseCount ? ` (${phaseCount})` : ""}` },
     { key: "reports", label: `Daily Reports${reports.total ? ` (${reports.total})` : ""}` },
+    ...(canViewInspections
+      ? [
+          {
+            key: "inspections" as Tab,
+            label: `Inspections${inspections.total ? ` (${inspections.total})` : ""}`,
+          },
+        ]
+      : []),
     { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
     { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
   ];
@@ -149,7 +157,7 @@ export function ProjectDetail({
         ) : null}
       </header>
 
-      <div className="flex gap-1 overflow-x-auto border-b">
+      <div className="flex flex-wrap gap-1 border-b">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -168,42 +176,17 @@ export function ProjectDetail({
       </div>
 
       {tab === "overview" ? (
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-                Status
-              </h2>
-              {canManage ? (
-                <ProjectStatusControl projectId={id} status={status} />
-              ) : (
-                <ProjectStatusBadge status={status} />
-              )}
-            </div>
-
-            <dl className="grid gap-5 sm:grid-cols-2">
-              <Field label="Location" value={project.location} />
-              <Field label="Contract amount" value={contract} />
-              <Field label="Start date" value={formatDate(project.startDate)} />
-              <Field label="Target end date" value={formatDate(project.targetEndDate)} />
-              <Field label="Actual end date" value={formatDate(project.actualEndDate)} />
-              <Field
-                label="Defects liability until"
-                value={formatDate(project.defectsLiabilityUntil)}
-              />
-              <div className="sm:col-span-2">
-                <Field label="Scope of work" value={project.scopeOfWork} />
-              </div>
-            </dl>
-          </div>
-
-          <aside className="space-y-4 lg:border-l lg:pl-8">
-            <h2 className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-              Team
-            </h2>
-            <ProjectTeam members={project.members} />
-          </aside>
-        </div>
+        <ProjectOverview
+          project={project}
+          phases={phases}
+          currency={currency}
+          timeZone={timeZone}
+          canManage={canManage}
+          dsrSummary={dsrSummary}
+          inspectionSummary={inspectionSummary}
+          canViewInspections={canViewInspections}
+          onOpenPhases={() => setTab("phases")}
+        />
       ) : null}
 
       {tab === "phases" ? (
@@ -214,6 +197,7 @@ export function ProjectDetail({
           canManage={canManageTasks}
           viewerId={viewerId}
           timeZone={timeZone}
+          templates={templates}
         />
       ) : null}
 
@@ -223,6 +207,19 @@ export function ProjectDetail({
           reports={reports}
           timeZone={timeZone}
           canCreate={canCreateDsr}
+        />
+      ) : null}
+
+      {tab === "inspections" && canViewInspections ? (
+        <ProjectInspectionList
+          projectId={id}
+          inspections={inspections}
+          timeZone={timeZone}
+          canRequest={canRequestInspection}
+          canRecord={canRecordInspection}
+          canRecordAny={canRecordAnyInspection}
+          viewerId={viewerId}
+          inspectors={inspectors}
         />
       ) : null}
 

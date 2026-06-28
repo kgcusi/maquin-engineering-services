@@ -1,0 +1,2 @@
+ALTER TABLE "tasks" ADD COLUMN "weight_pct" numeric(5, 2) DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_weight_pct_check" CHECK ("tasks"."weight_pct" between 0 and 100);

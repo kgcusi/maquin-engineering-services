@@ -10,6 +10,8 @@ type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 // after commit — never via the async outbox.
 export const cacheTags = {
   settings: "settings",
+  templates: "templates",
+  checklists: "checklists",
   dashboard: (userId: string) => `dashboard:${userId}`,
   projectBudget: (projectId: string) => `project:${projectId}:budget`,
   projectMaterials: (projectId: string) => `project:${projectId}:materials`,

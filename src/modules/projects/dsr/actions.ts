@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import type { Database } from "@/db/client";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@/db/schema/daily-reports";
 import { orNull } from "@/lib/action-helpers";
 import { audit } from "@/lib/audit";
+import { todayInTimeZone } from "@/lib/datetime";
 import { emitEvent } from "@/lib/events";
 import { nextRefCode } from "@/lib/refcodes";
 import { ActionError, action, actionNoTx, assertProjectAccess, hasPermission } from "@/lib/rbac";
@@ -21,14 +22,16 @@ import {
   getAttachmentDownloadUrl,
   removeAttachment,
 } from "@/modules/files/service";
+import { getSettings } from "@/modules/settings/queries";
 
-import { hasHighSeverityIssue, todayISO } from "./domain";
+import { canDeleteDsr, canReopenDsr, hasHighSeverityIssue } from "./domain";
 import {
   confirmDsrPhotoSchema,
   dsrIdSchema,
   dsrPhotoIdSchema,
   presignDsrPhotoSchema,
   resolveTodayDsrSchema,
+  reviewDsrSchema,
   saveDsrDraftSchema,
   type DsrEquipmentInput,
   type DsrManpowerInput,
@@ -117,22 +120,29 @@ export const resolveTodayDsrAction = action(
       projectId: input.projectId,
     });
 
-    const today = todayISO();
+    // "Today" in the FIRM's timezone (not UTC) so the one-DSR-per-day key matches
+    // the firm's calendar day, not the server's.
+    const today = todayInTimeZone((await getSettings()).timezone);
+    const reportFilter = and(
+      eq(dailyReports.projectId, input.projectId),
+      eq(dailyReports.reportDate, today),
+      isNull(dailyReports.deletedAt),
+    );
+
     const [existing] = await tx
       .select({ id: dailyReports.id, status: dailyReports.status })
       .from(dailyReports)
-      .where(
-        and(
-          eq(dailyReports.projectId, input.projectId),
-          eq(dailyReports.reportDate, today),
-          isNull(dailyReports.deletedAt),
-        ),
-      )
+      .where(reportFilter)
       .limit(1);
     if (existing) return { id: existing.id, status: existing.status, created: false };
 
     const refCode = await nextRefCode(tx, "DSR", new Date().getFullYear());
-    const [created] = await tx
+    // Collision-tolerant insert: if two "Start today's report" requests race past the
+    // existence check, the partial UNIQUE(project_id, report_date) WHERE deleted_at IS
+    // NULL index makes the loser a no-op; we then resume the row the winner created
+    // instead of surfacing a raw DB error (docs/17 §10.5 "never fill-then-fail"). The
+    // `where` predicate must match the index predicate so the conflict is inferred.
+    const insertedRows = await tx
       .insert(dailyReports)
       .values({
         refCode,
@@ -141,16 +151,32 @@ export const resolveTodayDsrAction = action(
         status: "DRAFT",
         createdBy: actor.id,
       })
+      .onConflictDoNothing({
+        target: [dailyReports.projectId, dailyReports.reportDate],
+        where: isNull(dailyReports.deletedAt),
+      })
       .returning({ id: dailyReports.id });
 
-    // Carry forward manpower + equipment from the last submitted DSR (editable).
+    if (insertedRows.length === 0) {
+      const [raced] = await tx
+        .select({ id: dailyReports.id, status: dailyReports.status })
+        .from(dailyReports)
+        .where(reportFilter)
+        .limit(1);
+      if (!raced) throw new ActionError("Couldn't open today's report. Please try again.");
+      return { id: raced.id, status: raced.status, created: false };
+    }
+    const created = insertedRows[0];
+
+    // Carry forward manpower + equipment from the last finalized DSR (submitted or
+    // approved — both are on the record), editable in the new draft.
     const [lastDsr] = await tx
       .select({ id: dailyReports.id })
       .from(dailyReports)
       .where(
         and(
           eq(dailyReports.projectId, input.projectId),
-          eq(dailyReports.status, "SUBMITTED"),
+          inArray(dailyReports.status, ["SUBMITTED", "APPROVED"]),
           isNull(dailyReports.deletedAt),
         ),
       )
@@ -260,15 +286,28 @@ export const submitDsrAction = action(
       projectId: dsr.projectId,
     });
     if (dsr.status === "SUBMITTED") return { id: input.id };
+    if (dsr.status !== "DRAFT") {
+      throw new ActionError("Only a draft report can be submitted.");
+    }
     assertCanEdit(actor, dsr);
     if (!dsr.workAccomplished || !dsr.workAccomplished.trim()) {
       throw new ActionError("Add what was accomplished before submitting.");
     }
 
     const now = new Date();
+    // Clear any prior review trail: a report sent back and re-submitted reads as a
+    // fresh submission awaiting review, not a stale "sent back" draft.
     await tx
       .update(dailyReports)
-      .set({ status: "SUBMITTED", submittedBy: actor.id, submittedAt: now, updatedAt: now })
+      .set({
+        status: "SUBMITTED",
+        submittedBy: actor.id,
+        submittedAt: now,
+        reviewRemarks: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        updatedAt: now,
+      })
       .where(eq(dailyReports.id, input.id));
 
     await audit(tx, {
@@ -310,10 +349,12 @@ export const submitDsrAction = action(
   },
 );
 
-// Admin re-opens a submitted report for correction (logged). dsr.view.all is
-// admin-only; assertProjectAccess is a formality (admins bypass).
+// Reopen a locked report back to DRAFT for correction (logged). The author may
+// reopen their own SUBMITTED report; an admin may reopen any SUBMITTED or APPROVED
+// one. Guarded by dsr.create (engineers hold it); canReopenDsr is the fine-grained
+// rule. Reopening clears the review trail so the fresh draft starts clean.
 export const reopenDsrAction = action(
-  "dsr.view.all",
+  "dsr.create",
   dsrIdSchema,
   async (input, { user: actor, tx }) => {
     const dsr = await loadDsr(tx, input.id);
@@ -323,11 +364,21 @@ export const reopenDsrAction = action(
       role: roleOf(actor),
       projectId: dsr.projectId,
     });
-    if (dsr.status !== "SUBMITTED") return { id: input.id };
+    if (dsr.status === "DRAFT") return { id: input.id };
+    if (!canReopenDsr({ id: actor.id, role: roleOf(actor) }, dsr)) {
+      throw new ActionError("You can't reopen this report.");
+    }
 
     await tx
       .update(dailyReports)
-      .set({ status: "DRAFT", submittedAt: null, updatedAt: new Date() })
+      .set({
+        status: "DRAFT",
+        submittedAt: null,
+        reviewRemarks: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        updatedAt: new Date(),
+      })
       .where(eq(dailyReports.id, input.id));
     await audit(tx, {
       actorId: actor.id,
@@ -335,6 +386,101 @@ export const reopenDsrAction = action(
       entityType: ENTITY,
       entityId: input.id,
       summary: `Re-opened daily report ${dsr.refCode}`,
+    });
+    return { id: input.id };
+  },
+);
+
+// A reviewer (admin, dsr.review) decides on a SUBMITTED report: APPROVE it, or SEND
+// it BACK for revision — which returns it to DRAFT carrying the remarks the author
+// must address. Either way the author is notified (dsr.reviewed).
+export const reviewDsrAction = action(
+  "dsr.review",
+  reviewDsrSchema,
+  async (input, { user: actor, tx }) => {
+    const dsr = await loadDsr(tx, input.id);
+    if (!dsr) throw new ActionError("Report not found.");
+    await assertProjectAccess(tx, {
+      userId: actor.id,
+      role: roleOf(actor),
+      projectId: dsr.projectId,
+    });
+    if (dsr.status !== "SUBMITTED") {
+      throw new ActionError("Only a submitted report can be reviewed.");
+    }
+
+    const now = new Date();
+    const approved = input.outcome === "APPROVED";
+    const review = {
+      reviewRemarks: orNull(input.remarks),
+      reviewedBy: actor.id,
+      reviewedAt: now,
+      updatedAt: now,
+    };
+    await tx
+      .update(dailyReports)
+      .set(
+        approved
+          ? { ...review, status: "APPROVED" as const }
+          : { ...review, status: "DRAFT" as const, submittedAt: null },
+      )
+      .where(eq(dailyReports.id, input.id));
+
+    await audit(tx, {
+      actorId: actor.id,
+      action: approved ? "dsr.approved" : "dsr.sent_back",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: approved
+        ? `Approved daily report ${dsr.refCode}`
+        : `Sent daily report ${dsr.refCode} back for revision`,
+    });
+    if (dsr.createdBy && dsr.createdBy !== actor.id) {
+      await emitEvent(tx, {
+        type: "dsr.reviewed",
+        payload: {
+          entityType: ENTITY,
+          entityId: input.id,
+          projectId: dsr.projectId,
+          authorId: dsr.createdBy,
+          actorId: actor.id,
+          summary: approved
+            ? `Your daily report ${dsr.refCode} was approved.`
+            : `Your daily report ${dsr.refCode} was sent back for revision.`,
+        },
+      });
+    }
+    return { id: input.id };
+  },
+);
+
+// Soft-delete a report. An admin may delete any; the author may delete their own
+// DRAFT. The partial unique index frees the deleted day's slot for a new report.
+export const deleteDsrAction = action(
+  "dsr.create",
+  dsrIdSchema,
+  async (input, { user: actor, tx }) => {
+    const dsr = await loadDsr(tx, input.id);
+    if (!dsr) throw new ActionError("Report not found.");
+    await assertProjectAccess(tx, {
+      userId: actor.id,
+      role: roleOf(actor),
+      projectId: dsr.projectId,
+    });
+    if (!canDeleteDsr({ id: actor.id, role: roleOf(actor) }, dsr)) {
+      throw new ActionError("You can't delete this report.");
+    }
+
+    await tx
+      .update(dailyReports)
+      .set({ deletedAt: new Date() })
+      .where(eq(dailyReports.id, input.id));
+    await audit(tx, {
+      actorId: actor.id,
+      action: "dsr.deleted",
+      entityType: ENTITY,
+      entityId: input.id,
+      summary: `Deleted daily report ${dsr.refCode}`,
     });
     return { id: input.id };
   },
@@ -431,6 +577,9 @@ export const deleteDsrPhotoAction = actionNoTx(
       role: roleOf(actor),
       projectId: dsr.projectId,
     });
+    // Symmetry with adding a photo: a locked (SUBMITTED/APPROVED) report's evidence
+    // can't be removed in place — reopen it to DRAFT first.
+    if (dsr.status !== "DRAFT") throw new ActionError("This report can no longer be edited.");
     assertCanEdit(actor, dsr);
     await removeAttachment(db, {
       attachmentId: input.attachmentId,

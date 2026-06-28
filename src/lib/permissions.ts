@@ -32,6 +32,9 @@ export const PERMISSION_KEYS = [
   "project.create",
   "project.update",
   "project.delete",
+  // Project Templates (admin reference data — docs/04 §5.8a, docs/17 §10.17)
+  "template.view",
+  "template.manage",
   // Phases / Tasks
   "task.view",
   "task.manage",
@@ -41,11 +44,15 @@ export const PERMISSION_KEYS = [
   "dsr.create",
   "dsr.update.own",
   "dsr.view.all",
+  "dsr.review",
   // QA/QC Inspection — role + keys ship Stage 2; the request→inspect→pass/fail
   // module is deferred (docs/17 §10.10). Reserved so the bundles are stable.
   "inspection.view",
   "inspection.request",
   "inspection.record",
+  // Inspection checklists (admin preset library — docs/04 §5.10a, docs/17 §10.16)
+  "checklist.view",
+  "checklist.manage",
   // Budget
   "budget.view",
   "budget.manage",
@@ -107,7 +114,9 @@ const ENGINEER_PERMISSIONS: Permission[] = [
   "dsr.create",
   "dsr.update.own",
   // An assigned engineer requests an inspection (names a QA/QC); the request grants
-  // that inspector INSPECTOR membership. Reserved — the module lands post-Stage-2.
+  // that inspector INSPECTOR membership. `inspection.view` lets the engineer see the
+  // project's Inspections tab and track their own requests.
+  "inspection.view",
   "inspection.request",
   "mr.view.assigned",
   "mr.create",

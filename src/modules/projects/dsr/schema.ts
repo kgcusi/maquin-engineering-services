@@ -51,6 +51,20 @@ const issueRow = z.object({
 export const resolveTodayDsrSchema = z.object({ projectId: z.string().uuid() });
 export const dsrIdSchema = z.object({ id: z.string().uuid() });
 
+// Reviewer decision on a SUBMITTED report: APPROVE it (remarks optional) or SEND it
+// back for revision (remarks required so the author knows what to fix).
+export const reviewDsrSchema = z
+  .object({
+    id: z.string().uuid(),
+    outcome: z.enum(["APPROVED", "SENT_BACK"]),
+    remarks: optionalText(2000),
+  })
+  .refine((v) => v.outcome !== "SENT_BACK" || Boolean(v.remarks?.trim()), {
+    message: "Add remarks so the author knows what to fix",
+    path: ["remarks"],
+  });
+export type ReviewDsrInput = z.infer<typeof reviewDsrSchema>;
+
 // Autosave / save the working DRAFT: header fields + the full child sets, which
 // replace the stored rows (the form owns each section as a whole).
 export const saveDsrDraftSchema = z.object({

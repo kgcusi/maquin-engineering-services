@@ -26,21 +26,43 @@ import {
   backoffMs,
   buildIdempotencyKey,
   buildNotificationContent,
+  buildNotificationLink,
   parseChannels,
   parseRecipientRule,
+  splitRecipientRules,
 } from "./domain";
 
 type Recipient = { id: string; email: string; name: string };
 
 const ACTIVE_USER = or(isNull(user.isActive), eq(user.isActive, true));
 
-// Resolve a recipient_rule against the directory. ROLE:* / USER:<field> /
-// PROJECT:<selector> are all supported. PROJECT:* resolves the payload's
-// `projectId` via project_members (Stage 2): a "LEAD" selector → the lead only,
-// anything else → the full team (LEAD + MEMBER). The hidden WEBMASTER never
-// matches ROLE:ADMIN (role is matched exactly), preserving the hidden-superuser
-// invariant. The actor is excluded by the caller (no "you did X" self-notes).
+// Resolve a recipient_rule against the directory. A rule may be a union of
+// selectors joined by "+" (e.g. "ROLE:ADMIN+PROJECT:LEAD") — each is resolved and
+// the recipients are unioned, de-duped by id, so "lead + admins" reaches both
+// without notifying anyone twice. The actor is excluded by the caller.
 async function resolveRecipients(
+  db: Database,
+  rule: string | null,
+  payload: Record<string, unknown>,
+): Promise<Recipient[]> {
+  const tokens = splitRecipientRules(rule);
+  if (tokens.length <= 1) return resolveOneRule(db, rule, payload);
+
+  const byId = new Map<string, Recipient>();
+  for (const token of tokens) {
+    for (const recipient of await resolveOneRule(db, token, payload)) {
+      if (!byId.has(recipient.id)) byId.set(recipient.id, recipient);
+    }
+  }
+  return [...byId.values()];
+}
+
+// Resolve a SINGLE selector. ROLE:* / USER:<field> / PROJECT:<selector> are all
+// supported. PROJECT:* resolves the payload's `projectId` via project_members
+// (Stage 2): a "LEAD" selector → the lead only, anything else → the full team
+// (LEAD + MEMBER). The hidden WEBMASTER never matches ROLE:ADMIN (role is matched
+// exactly), preserving the hidden-superuser invariant.
+async function resolveOneRule(
   db: Database,
   rule: string | null,
   payload: Record<string, unknown>,
@@ -118,6 +140,7 @@ export async function dispatchOutbox(
         NOTIFICATION_EVENTS[event.eventType as keyof typeof NOTIFICATION_EVENTS]?.label ??
         humanizeEvent(event.eventType);
       const content = buildNotificationContent(label, payload);
+      const link = buildNotificationLink(event.eventType, payload);
       const scopeId = content.entityId ?? event.id;
       const now = new Date();
 
@@ -142,6 +165,7 @@ export async function dispatchOutbox(
                 }),
                 entityType: content.entityType,
                 entityId: content.entityId,
+                link,
               })
               .onConflictDoNothing({ target: notifications.idempotencyKey });
             created += 1;

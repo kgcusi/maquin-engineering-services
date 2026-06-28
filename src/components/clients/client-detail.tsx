@@ -9,8 +9,10 @@ import { DirectoryStatusBadge } from "@/components/directory/status-badge";
 import { AttachmentList } from "@/components/files/attachment-list";
 import { FileUploader } from "@/components/files/file-uploader";
 import { NotesPanel } from "@/components/notes/notes-panel";
+import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { ClientProjectRow } from "@/modules/projects/queries";
 import {
   addClientNoteAction,
   confirmClientDocumentAction,
@@ -43,11 +45,13 @@ export function ClientDetail({
   client,
   documents,
   notes,
+  projects,
   timeZone,
 }: {
   client: ClientRow;
   documents: Paginated<AttachmentRow>;
   notes: Paginated<NoteRow>;
+  projects: ClientProjectRow[];
   timeZone: string;
 }) {
   const [editOpen, setEditOpen] = useState(false);
@@ -58,7 +62,7 @@ export function ClientDetail({
     { key: "info", label: "Info" },
     { key: "documents", label: `Documents${documents.total ? ` (${documents.total})` : ""}` },
     { key: "notes", label: `Notes${notes.total ? ` (${notes.total})` : ""}` },
-    { key: "projects", label: "Projects" },
+    { key: "projects", label: `Projects${projects.length ? ` (${projects.length})` : ""}` },
   ];
 
   return (
@@ -156,17 +160,46 @@ export function ClientDetail({
       ) : null}
 
       {tab === "projects" ? (
-        <div className="flex max-w-2xl flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
-          <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
-            <FolderKanban className="size-5" />
-          </span>
-          <div className="space-y-1">
-            <p className="text-sm font-medium">No project history yet</p>
-            <p className="text-muted-foreground text-sm">
-              Projects created for this client will appear here once the Projects module ships.
-            </p>
+        projects.length === 0 ? (
+          <div className="flex max-w-2xl flex-col items-center gap-3 rounded-lg border border-dashed py-14 text-center">
+            <span className="bg-muted text-muted-foreground flex size-10 items-center justify-center rounded-full">
+              <FolderKanban className="size-5" />
+            </span>
+            <div className="space-y-1">
+              <p className="text-sm font-medium">No projects yet</p>
+              <p className="text-muted-foreground text-sm">
+                Projects created for this client will appear here.
+              </p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <ul className="divide-border max-w-2xl divide-y overflow-hidden rounded-lg border">
+            {projects.map((p) => (
+              <li key={p.id}>
+                <Link
+                  href={`/projects/${p.id}` as Route}
+                  className="hover:bg-muted/40 group flex items-center gap-3 px-4 py-3 transition-colors"
+                >
+                  <span className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md">
+                    <FolderKanban className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium">{p.name}</span>
+                      <ProjectStatusBadge status={p.status} />
+                    </div>
+                    <span className="text-muted-foreground font-mono text-xs tracking-tight">
+                      {p.refCode}
+                    </span>
+                  </div>
+                  <span className="text-muted-foreground shrink-0 text-sm tabular-nums">
+                    {Math.round(p.progressPct)}%
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )
       ) : null}
 
       <ClientFormDialog open={editOpen} client={client} onOpenChange={setEditOpen} />

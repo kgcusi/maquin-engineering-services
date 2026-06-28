@@ -10,6 +10,10 @@
 // Rules the resolver can't satisfy yet (PROJECT:*) simply produce no recipients.
 
 export type NotificationChannel = "EMAIL" | "IN_APP";
+// DIGEST aggregation isn't built — the dispatcher sends every enabled event
+// immediately. The mode is reserved for a future digest cron; until it ships,
+// catalog entries stay IMMEDIATE so the label never implies behavior that doesn't
+// exist. The column on notification_settings is kept for that future use.
 export type NotificationMode = "IMMEDIATE" | "DIGEST";
 
 export type NotificationEventDef = {
@@ -99,7 +103,34 @@ export const NOTIFICATION_EVENTS = {
     label: "Task delayed",
     defaultRecipientRule: "ROLE:ADMIN",
     defaultChannels: ["EMAIL", "IN_APP"],
-    defaultMode: "DIGEST",
+    defaultMode: "IMMEDIATE",
+  },
+  "task.blocked": {
+    label: "Task blocked",
+    // Composite rule (resolved as a union): the firm's admins AND the project's
+    // lead engineer — whoever needs to clear the blocker.
+    defaultRecipientRule: "ROLE:ADMIN+PROJECT:LEAD",
+    defaultChannels: ["EMAIL", "IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
+  "task.assigned": {
+    label: "Task assigned to you",
+    defaultRecipientRule: "USER:assigneeId",
+    defaultChannels: ["IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
+  "inspection.requested": {
+    label: "Inspection requested",
+    defaultRecipientRule: "USER:inspectorId",
+    defaultChannels: ["EMAIL", "IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
+  "inspection.completed": {
+    label: "Inspection completed",
+    // Composite union: the engineer who requested it AND the project's lead.
+    defaultRecipientRule: "USER:requestedById+PROJECT:LEAD",
+    defaultChannels: ["EMAIL", "IN_APP"],
+    defaultMode: "IMMEDIATE",
   },
   "phase.critical_update": {
     label: "Phase flagged critical",
@@ -111,7 +142,7 @@ export const NOTIFICATION_EVENTS = {
     label: "Daily site report submitted",
     defaultRecipientRule: "ROLE:ADMIN",
     defaultChannels: ["IN_APP"],
-    defaultMode: "DIGEST",
+    defaultMode: "IMMEDIATE",
   },
   "dsr.issue.flagged": {
     label: "Site issue flagged",
@@ -119,11 +150,18 @@ export const NOTIFICATION_EVENTS = {
     defaultChannels: ["EMAIL", "IN_APP"],
     defaultMode: "IMMEDIATE",
   },
+  "dsr.reviewed": {
+    label: "Daily site report reviewed",
+    // The author hears back when their report is approved or sent back for revision.
+    defaultRecipientRule: "USER:authorId",
+    defaultChannels: ["IN_APP"],
+    defaultMode: "IMMEDIATE",
+  },
   "stock.low": {
     label: "Stock low",
     defaultRecipientRule: "ROLE:ADMIN",
     defaultChannels: ["EMAIL", "IN_APP"],
-    defaultMode: "DIGEST",
+    defaultMode: "IMMEDIATE",
   },
   "user.created": {
     label: "Welcome to MAQUIN Engineering Services",

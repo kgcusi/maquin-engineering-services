@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 import {
+  CalendarCheck,
   CalendarRange,
+  ChevronDown,
   ListTree,
   MoreHorizontal,
   Pencil,
@@ -12,12 +13,16 @@ import {
   Trash2,
   TriangleAlert,
   UserRound,
+  Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { PhaseFormDialog } from "@/components/projects/phase-form-dialog";
+import { PhaseTasksEditor } from "@/components/projects/phase-tasks-editor";
 import { TaskFormDialog } from "@/components/projects/task-form-dialog";
 import { TaskProgressControl } from "@/components/projects/task-progress-control";
+import { ApplyTemplateDialog } from "@/components/templates/apply-template-dialog";
+import { DelayedBadge, TaskStatusBadge, TaskStatusLegend } from "@/components/projects/task-status";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,7 +33,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,21 +41,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useProgressTransition } from "@/hooks/use-progress-transition";
-import { formatDateTime } from "@/lib/datetime";
-import { deriveProgressStatus, progressStatusLabel, type ProgressStatus } from "@/lib/statuses";
+import { formatDateTime, todayInTimeZone } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
-import { isTaskDelayed } from "@/modules/projects/tasks/domain";
+import { isTaskDelayed, round2 } from "@/modules/projects/tasks/domain";
 import { deletePhaseAction, deleteTaskAction } from "@/modules/projects/tasks/actions";
 import type { PhaseWithTasks, TaskRow } from "@/modules/projects/tasks/queries";
+import type { TemplateTree } from "@/modules/projects/templates/queries";
 
 type Option = { id: string; name: string };
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 
 function fmtDate(iso: string | null, timeZone: string): string | null {
   if (!iso) return null;
   return formatDateTime(`${iso}T00:00:00`, timeZone, "date");
 }
+
+// Total weight allocated across a phase's tasks (optionally excluding one being edited).
+const sumWeights = (rows: TaskRow[], excludeId?: string) =>
+  round2(rows.reduce((total, t) => (t.id === excludeId ? total : total + t.weightPct), 0));
 
 // ── Progress meter (matches the projects table for cross-screen consistency) ──
 function ProgressMeter({ pct, className }: { pct: number; className?: string }) {
@@ -72,53 +78,6 @@ function ProgressMeter({ pct, className }: { pct: number; className?: string }) 
         {clamped}%
       </span>
     </div>
-  );
-}
-
-const STATUS_TONE: Record<ProgressStatus, string> = {
-  NOT_STARTED: "border-border text-muted-foreground",
-  IN_PROGRESS: "border-primary/30 bg-primary/10 text-primary",
-  DONE: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 dark:border-emerald-400/30",
-};
-
-function StatusBadge({ pct }: { pct: number }) {
-  const status = deriveProgressStatus(pct);
-  return (
-    <Badge variant="outline" className={cn("font-medium", STATUS_TONE[status])}>
-      {progressStatusLabel(status)}
-    </Badge>
-  );
-}
-
-function BlockedBadge({ reason }: { reason: string | null }) {
-  const label = (
-    <Badge
-      variant="outline"
-      className="cursor-default gap-1 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:border-amber-400/30 dark:text-amber-400"
-    >
-      <TriangleAlert className="size-3" /> Blocked
-    </Badge>
-  );
-  if (!reason?.trim()) return label;
-  return (
-    <TooltipPrimitive.Root>
-      <TooltipPrimitive.Trigger render={label} />
-      <TooltipPrimitive.Portal>
-        <TooltipPrimitive.Positioner side="top" sideOffset={6} className="z-50">
-          <TooltipPrimitive.Popup className="bg-popover text-popover-foreground ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 max-w-xs rounded-md px-2.5 py-1.5 text-xs shadow-md ring-1 duration-100">
-            {reason}
-          </TooltipPrimitive.Popup>
-        </TooltipPrimitive.Positioner>
-      </TooltipPrimitive.Portal>
-    </TooltipPrimitive.Root>
-  );
-}
-
-function DelayedBadge() {
-  return (
-    <Badge variant="destructive" className="gap-1">
-      <CalendarRange className="size-3" /> Delayed
-    </Badge>
   );
 }
 
@@ -208,17 +167,32 @@ function TaskRowItem({
   onEdit: (task: TaskRow) => void;
   onDelete: (task: TaskRow) => void;
 }) {
-  const delayed = isTaskDelayed(task.progressPct, task.dueDate, task.isDelayed, todayISO());
+  const delayed = isTaskDelayed(
+    task.progressPct,
+    task.targetEndDate,
+    task.isDelayed,
+    todayInTimeZone(timeZone),
+  );
   const canSetProgress = canManage || viewerId === task.assigneeId;
-  const due = fmtDate(task.dueDate, timeZone);
+  const due = fmtDate(task.targetEndDate, timeZone);
+  const done = fmtDate(task.actualEndDate, timeZone);
 
   return (
-    <li className="grid grid-cols-1 items-center gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto] sm:gap-y-1">
+    <li className="grid grid-cols-1 items-center gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-y-1">
       <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate text-sm font-medium">{task.name}</span>
-          <StatusBadge pct={task.progressPct} />
-          {task.isBlocked ? <BlockedBadge reason={task.blockedReason} /> : null}
+          {canSetProgress ? (
+            <TaskProgressControl
+              taskId={task.id}
+              taskName={task.name}
+              progressPct={task.progressPct}
+              isBlocked={task.isBlocked}
+              blockedReason={task.blockedReason}
+            />
+          ) : (
+            <TaskStatusBadge pct={task.progressPct} isBlocked={task.isBlocked} />
+          )}
           {delayed ? <DelayedBadge /> : null}
         </div>
         <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
@@ -236,20 +210,31 @@ function TaskRowItem({
               </span>
             </>
           ) : null}
+          {done ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="text-emerald-600 tabular-nums dark:text-emerald-400">
+                Done {done}
+              </span>
+            </>
+          ) : null}
+          {task.weightPct > 0 ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="tabular-nums">{round2(task.weightPct)}% of phase</span>
+            </>
+          ) : null}
         </p>
+        {task.isBlocked && task.blockedReason?.trim() ? (
+          <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+            <span>{task.blockedReason}</span>
+          </p>
+        ) : null}
       </div>
 
-      <ProgressMeter pct={task.progressPct} className="max-w-56" />
-
-      <div className="flex items-center justify-end gap-0.5">
-        {canSetProgress ? (
-          <TaskProgressControl
-            taskId={task.id}
-            taskName={task.name}
-            progressPct={task.progressPct}
-          />
-        ) : null}
-        {canManage ? (
+      {canManage ? (
+        <div className="flex items-center justify-end gap-0.5">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -269,8 +254,8 @@ function TaskRowItem({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -285,6 +270,7 @@ function PhaseSection({
   onAddTask,
   onEditPhase,
   onDeletePhase,
+  onEditTasks,
   onEditTask,
   onDeleteTask,
 }: {
@@ -296,32 +282,79 @@ function PhaseSection({
   onAddTask: (phase: PhaseWithTasks) => void;
   onEditPhase: (phase: PhaseWithTasks) => void;
   onDeletePhase: (phase: PhaseWithTasks) => void;
+  onEditTasks: (phase: PhaseWithTasks) => void;
   onEditTask: (phase: PhaseWithTasks, task: TaskRow) => void;
   onDeleteTask: (task: TaskRow) => void;
 }) {
-  const start = fmtDate(phase.startDate, timeZone);
-  const end = fmtDate(phase.targetEndDate, timeZone);
-  const schedule = start && end ? `${start} → ${end}` : (end ?? start ?? null);
+  const range = (start: string | null, end: string | null) =>
+    start && end ? `${start} → ${end}` : (end ?? start ?? null);
+  const target = range(
+    fmtDate(phase.targetStartDate, timeZone),
+    fmtDate(phase.targetEndDate, timeZone),
+  );
+  const actual = range(
+    fmtDate(phase.actualStartDate, timeZone),
+    fmtDate(phase.actualEndDate, timeZone),
+  );
+  const allocated = sumWeights(phase.tasks);
+  const overAllocated = allocated > 100.001;
+  // A finished phase opens collapsed so the list stays scannable; manual toggles
+  // stick for the session (a reload re-applies the auto-collapse).
+  const [open, setOpen] = useState(phase.progressPct < 100);
 
   return (
     <section className="overflow-hidden rounded-lg border">
-      <header className="bg-muted/30 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 border-b px-4 py-3">
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <span className="text-muted-foreground bg-background flex size-6 shrink-0 items-center justify-center rounded-md border text-xs font-semibold tabular-nums">
-              {index + 1}
-            </span>
-            <h3 className="truncate text-sm font-semibold tracking-tight">{phase.name}</h3>
-            <span className="text-muted-foreground text-xs tabular-nums">
-              {phase.tasks.length} {phase.tasks.length === 1 ? "task" : "tasks"}
-            </span>
+      <header
+        className={cn(
+          "bg-muted/30 flex flex-wrap items-start justify-between gap-x-4 gap-y-3 px-4 py-3",
+          open && "border-b",
+        )}
+      >
+        <div className="flex min-w-0 items-start gap-2.5">
+          <button
+            type="button"
+            onClick={() => setOpen((prev) => !prev)}
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} phase ${phase.name}`}
+            className="text-muted-foreground hover:text-foreground mt-0.5 shrink-0 transition-colors"
+          >
+            <ChevronDown className={cn("size-4 transition-transform", !open && "-rotate-90")} />
+          </button>
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex items-center gap-2.5">
+              <span className="text-muted-foreground bg-background flex size-6 shrink-0 items-center justify-center rounded-md border text-xs font-semibold tabular-nums">
+                {index + 1}
+              </span>
+              <h3 className="truncate text-sm font-semibold tracking-tight">{phase.name}</h3>
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {phase.tasks.length} {phase.tasks.length === 1 ? "task" : "tasks"}
+              </span>
+              {allocated > 0 ? (
+                <span
+                  className={cn(
+                    "text-xs tabular-nums",
+                    overAllocated ? "text-destructive font-medium" : "text-muted-foreground",
+                  )}
+                >
+                  · {allocated}% allocated
+                </span>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+              {target ? (
+                <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
+                  <CalendarRange className="size-3.5 shrink-0" />
+                  <span className="tabular-nums">{target}</span>
+                </p>
+              ) : null}
+              {actual ? (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CalendarCheck className="size-3.5 shrink-0" />
+                  <span className="tabular-nums">Actual {actual}</span>
+                </p>
+              ) : null}
+            </div>
           </div>
-          {schedule ? (
-            <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-              <CalendarRange className="size-3.5 shrink-0" />
-              <span className="tabular-nums">{schedule}</span>
-            </p>
-          ) : null}
         </div>
 
         <div className="flex items-center gap-3">
@@ -350,6 +383,10 @@ function PhaseSection({
                   <MoreHorizontal />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onEditTasks(phase)}>
+                    <ListTree />
+                    Edit all tasks
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onEditPhase(phase)}>
                     <Pencil />
                     Edit phase
@@ -365,7 +402,7 @@ function PhaseSection({
         </div>
       </header>
 
-      {phase.tasks.length === 0 ? (
+      {!open ? null : phase.tasks.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
           <p className="text-muted-foreground text-sm">No tasks in this phase yet.</p>
           {canManage ? (
@@ -396,7 +433,12 @@ function PhaseSection({
 
 // ── Tab body ──────────────────────────────────────────────────────────────────
 type PhaseEditState = { mode: "create" } | { mode: "edit"; phase: PhaseWithTasks } | null;
-type TaskEditState = { phaseId: string; phaseName: string; task: TaskRow | null } | null;
+type TaskEditState = {
+  phaseId: string;
+  phaseName: string;
+  task: TaskRow | null;
+  allocated: number;
+} | null;
 
 export function ProjectTasks({
   projectId,
@@ -405,6 +447,7 @@ export function ProjectTasks({
   canManage,
   viewerId,
   timeZone,
+  templates,
 }: {
   projectId: string;
   phases: PhaseWithTasks[];
@@ -412,12 +455,16 @@ export function ProjectTasks({
   canManage: boolean;
   viewerId: string;
   timeZone: string;
+  templates: TemplateTree[];
 }) {
   const [phaseEdit, setPhaseEdit] = useState<PhaseEditState>(null);
   const [taskEdit, setTaskEdit] = useState<TaskEditState>(null);
+  const [bulkEdit, setBulkEdit] = useState<PhaseWithTasks | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
+  const [applyOpen, setApplyOpen] = useState(false);
 
   const nextSequence = phases.reduce((max, p) => Math.max(max, p.sequence + 1), 0);
+  const canApplyTemplate = canManage && templates.length > 0;
 
   if (phases.length === 0) {
     return (
@@ -430,15 +477,28 @@ export function ProjectTasks({
             <p className="text-sm font-medium">No phases yet</p>
             <p className="text-muted-foreground mx-auto max-w-sm text-sm">
               {canManage
-                ? "Break the work down into phases, then add tasks under each. Progress rolls up automatically."
+                ? canApplyTemplate
+                  ? "Apply a template to scaffold the whole schedule from a start date, or build the work breakdown by hand."
+                  : "Break the work down into phases, then add tasks under each. Progress rolls up automatically."
                 : "When the project lead lays out the work breakdown, phases and tasks will appear here."}
             </p>
           </div>
           {canManage ? (
-            <Button className="mt-1" onClick={() => setPhaseEdit({ mode: "create" })}>
-              <Plus />
-              Add the first phase
-            </Button>
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+              {canApplyTemplate ? (
+                <Button onClick={() => setApplyOpen(true)}>
+                  <Wand2 />
+                  Apply template
+                </Button>
+              ) : null}
+              <Button
+                variant={canApplyTemplate ? "outline" : "default"}
+                onClick={() => setPhaseEdit({ mode: "create" })}
+              >
+                <Plus />
+                Add the first phase
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -452,20 +512,30 @@ export function ProjectTasks({
             nextSequence={nextSequence}
           />
         ) : null}
+
+        {canApplyTemplate ? (
+          <ApplyTemplateDialog
+            open={applyOpen}
+            onOpenChange={setApplyOpen}
+            projectId={projectId}
+            templates={templates}
+          />
+        ) : null}
       </>
     );
   }
 
   return (
     <div className="space-y-4">
-      {canManage ? (
-        <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TaskStatusLegend />
+        {canManage ? (
           <Button variant="outline" onClick={() => setPhaseEdit({ mode: "create" })}>
             <Plus />
             Add phase
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
       <div className="space-y-3">
         {phases.map((phase, index) => (
@@ -476,7 +546,14 @@ export function ProjectTasks({
             canManage={canManage}
             viewerId={viewerId}
             timeZone={timeZone}
-            onAddTask={(p) => setTaskEdit({ phaseId: p.id, phaseName: p.name, task: null })}
+            onAddTask={(p) =>
+              setTaskEdit({
+                phaseId: p.id,
+                phaseName: p.name,
+                task: null,
+                allocated: sumWeights(p.tasks),
+              })
+            }
             onEditPhase={(p) => setPhaseEdit({ mode: "edit", phase: p })}
             onDeletePhase={(p) =>
               setDeleteTarget({
@@ -486,7 +563,15 @@ export function ProjectTasks({
                 taskCount: p.tasks.length,
               })
             }
-            onEditTask={(p, t) => setTaskEdit({ phaseId: p.id, phaseName: p.name, task: t })}
+            onEditTasks={(p) => setBulkEdit(p)}
+            onEditTask={(p, t) =>
+              setTaskEdit({
+                phaseId: p.id,
+                phaseName: p.name,
+                task: t,
+                allocated: sumWeights(p.tasks, t.id),
+              })
+            }
             onDeleteTask={(t) => setDeleteTarget({ kind: "task", id: t.id, name: t.name })}
           />
         ))}
@@ -513,6 +598,20 @@ export function ProjectTasks({
           phaseId={taskEdit.phaseId}
           phaseName={taskEdit.phaseName}
           task={taskEdit.task}
+          assignees={assignees}
+          phaseAllocatedPct={taskEdit.allocated}
+        />
+      ) : null}
+
+      {canManage && bulkEdit ? (
+        <PhaseTasksEditor
+          open
+          onOpenChange={(open) => {
+            if (!open) setBulkEdit(null);
+          }}
+          phaseId={bulkEdit.id}
+          phaseName={bulkEdit.name}
+          tasks={bulkEdit.tasks}
           assignees={assignees}
         />
       ) : null}

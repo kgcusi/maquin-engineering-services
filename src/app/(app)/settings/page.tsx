@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 
 import { EmailSettingsForm } from "@/components/settings/email-settings-form";
+import { NotificationSettingsPanel } from "@/components/settings/notification-settings-panel";
 import { NotificationTestPanel } from "@/components/settings/notification-test-panel";
 import { SettingsForm } from "@/components/settings/settings-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { requirePagePermission } from "@/lib/page-guards";
+import { listNotificationSettings } from "@/modules/notifications/queries";
 import { getEmailConfig, getSettings } from "@/modules/settings/queries";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -13,7 +16,11 @@ export default async function SettingsPage() {
   // WEBMASTER-only: `settings.view` is excluded from the ADMIN bundle, so admins
   // and engineers are redirected to their dashboard (src/lib/permissions.ts).
   await requirePagePermission("settings.view");
-  const [settings, emailConfig] = await Promise.all([getSettings(), getEmailConfig()]);
+  const [settings, emailConfig, notificationEvents] = await Promise.all([
+    getSettings(),
+    getEmailConfig(),
+    listNotificationSettings(),
+  ]);
 
   return (
     <div className="w-full space-y-6">
@@ -40,8 +47,8 @@ export default async function SettingsPage() {
         <CardHeader>
           <CardTitle>Email delivery</CardTitle>
           <CardDescription>
-            Resend credentials used to send email. Sending isn’t wired to any events yet — set the
-            credentials here and verify them with a connection test.
+            Resend credentials used to send email. Set them here and verify with a connection test;
+            enabled notification events then deliver through this sender.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -53,15 +60,28 @@ export default async function SettingsPage() {
         <CardHeader>
           <CardTitle>Notifications</CardTitle>
           <CardDescription>
-            No app event sends email yet — each is enabled per-event once confirmed with the firm.
-            Use this to verify the pipeline end-to-end: it sends a test email to you and lights up
-            the in-app bell.
+            Turn events on per-firm and choose how each one reaches people. Recipients are fixed per
+            event; you control whether it fires and on which channels.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <NotificationTestPanel
-            canSend={emailConfig.apiKeyConfigured && emailConfig.fromAddress !== null}
+        <CardContent className="space-y-6">
+          <NotificationSettingsPanel
+            events={notificationEvents}
+            emailConfigured={emailConfig.apiKeyConfigured && emailConfig.fromAddress !== null}
           />
+          <Separator />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-sm font-medium">End-to-end test</h3>
+              <p className="text-muted-foreground text-xs">
+                Sends a real email to your address and drops an in-app notice — a delivery check
+                independent of the events above.
+              </p>
+            </div>
+            <NotificationTestPanel
+              canSend={emailConfig.apiKeyConfigured && emailConfig.fromAddress !== null}
+            />
+          </div>
         </CardContent>
       </Card>
     </div>

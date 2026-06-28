@@ -374,6 +374,48 @@ implement `site_receipts` via the §6 neutral shortage **reason picker** rather 
 - Every state change audited; multi-row writes (DSR submit + children; task update + roll-up) in
   **one transaction** (consistent with Stage 1).
 
+### Stage 2 review addendum — Templates & Inspection checklists (grilled & locked, 2026-06-23)
+
+> A planning round on two presets capabilities, decided with the stakeholder. These **win** over
+> 00–16 and refine §10 above; reconcile into home docs (02 §4.5–4.6, 04 §5.8a/§5.10a, 03) at build.
+
+16. **Re-inspection = reopen in place + append-only history (NOT a new request).** A FAILED
+    `inspections` row is re-inspected on the **same** record; **every recording appends an
+    `inspection_attempts` row** (with its snapshotted `inspection_item_results`), and the
+    inspection's `status`/`outcome_remarks` reflect the **latest** attempt. The outcome dialog
+    pre-fills from the last attempt (passed items carry forward, editable). Chosen over a
+    new-linked-request chain because forcing a full re-request (re-pick QA/QC, re-schedule,
+    re-notify, re-fill) for a single failed item is too heavyweight — the stakeholder wanted a
+    **history log**, not separate records. `attempt_no` is server-assigned (`max+1` in-tx); the
+    `INSPECTOR` membership grant is already `onConflictDoNothing`, so re-recording never duplicates
+    it. **Item results snapshot the checklist label** so later preset edits never rewrite history.
+    Overall outcome stays a **deliberate human decision** (items are evidence, never an auto-gate).
+    The QA/QC engineer **picks the preset checklist at inspection time** (by `category`); no
+    checklist = today's free-form pass/fail. Photos attach **per item**
+    (`attachments.entity_type='inspection_item_result'`). New `INSPECTION_ITEM_RESULTS`
+    (`PASS`/`FAIL`/`NA`) pinned in `src/lib/statuses.ts`; `inspection_status` enum unchanged
+    (`REQUESTED`/`PASSED`/`FAILED`). New keys `checklist.view`/`checklist.manage` (admin). (02 §4.5,
+    04 §5.10a)
+
+17. **Project Templates = duration-chained snapshot with an editable review step.** A template
+    carries phases (each a `duration_days`, default 7) and tasks (a `weight_pct`); creating a
+    project **from a template** computes a **sequential calendar-day** schedule from one project
+    start date (phase 1 on the start; each next phase the day after the prior's
+    `end = start + duration − 1`, inclusive) and surfaces a **review step where per-phase durations
+    are adjustable (validated ≥ 1) AND each phase's task list is fully editable — rename, reweight,
+    remove, or add — before any rows are written** (a phase's task weights may not exceed 100%,
+    guarded client-side and in the service). **Phases stay the template's** (no add/remove/rename at
+    the review step — edit them after the project exists). The client sends the **full edited task
+    list per phase** keyed by template phase id, so the template's stored tasks are **not re-read**
+    at instantiation (removing or reweighting a seeded task just works). **Snapshot, not link** — the
+    cloned phases/tasks are independent of the template. Tasks carry **no dates** (phase-level
+    scheduling only). Instantiation writes phases (target dates from the chain; actuals null;
+    progress 0) + tasks (name + weight + sequence) in **one transaction** via a shared
+    `instantiateTemplate(tx, …)` service, reused by both the create-time path and an
+    apply-to-empty-project path. New keys `template.view`/`template.manage` (admin). **Out of v1:**
+    working-day/holiday calendars, "save project as template", task-level durations, adding/removing
+    phases at the review step. (02 §4.6, 04 §5.8a)
+
 ### Stage-1 pre-reqs (do before Stage 2 leans on them) — from the Stage-1 code audit
 
 - [ ] **Reconcile `cookieCache.maxAge` (300s) vs the "60s" contract** — `auth.ts:41` is `300`, but

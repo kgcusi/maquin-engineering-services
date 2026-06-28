@@ -11,6 +11,7 @@ import {
   listProjects,
   type ProjectViewer,
 } from "@/modules/projects/queries";
+import { getActiveTemplatesWithTree } from "@/modules/projects/templates/queries";
 import { getSettings } from "@/modules/settings/queries";
 import { directoryListSchema } from "@/modules/shared/list-params";
 
@@ -58,11 +59,12 @@ async function ProjectsSection({
   searchParams: SearchParams;
 }) {
   const params = directoryListSchema.parse(await searchParams);
-  const [result, settings, clients, engineers] = await Promise.all([
+  const [result, settings, clients, engineers, templates] = await Promise.all([
     listProjects(viewer, params),
     getSettings(),
     canCreate ? listClientOptions() : Promise.resolve([]),
     canCreate ? listEngineerOptions() : Promise.resolve([]),
+    canCreate ? getActiveTemplatesWithTree() : Promise.resolve([]),
   ]);
 
   return (
@@ -75,6 +77,7 @@ async function ProjectsSection({
       canManage={canManage}
       clients={clients}
       engineers={engineers}
+      templates={templates}
       timeZone={settings.timezone}
     />
   );

@@ -5,8 +5,8 @@
 // The Resend API key is a SECRET: it is stored in app_settings but NEVER returned
 // to the client raw and NEVER cached. getEmailConfig() exposes only a masked hint
 // (this file's maskApiKey), the audit log redacts it, and the raw value is read
-// server-side only by getResendCredentials() for the connection test. Actual
-// email SENDING is intentionally NOT wired yet — this slice is credentials-only.
+// server-side only by getResendCredentials() for the connection test and the live
+// send path (the notification dispatcher's deliverQueued).
 
 export const EMAIL_SETTINGS_KEYS = ["email_from", "resend_api_key"] as const;
 export type EmailSettingKey = (typeof EMAIL_SETTINGS_KEYS)[number];

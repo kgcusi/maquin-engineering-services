@@ -8,27 +8,27 @@ export function round2(n: number): number {
 }
 
 /** Display-only "delayed": the stored transition flag OR the live past-due
- *  derivation (an open task past its due date). The read path NEVER writes this —
- *  the nightly job owns the stored flag (docs/17 §10.7). Dates are YYYY-MM-DD. */
+ *  derivation (an open task past its target end date). The read path NEVER writes
+ *  this — the nightly job owns the stored flag (docs/17 §10.7). Dates are YYYY-MM-DD. */
 export function isTaskDelayed(
   progressPct: number,
-  dueDate: string | null,
+  targetEndDate: string | null,
   isDelayedFlag: boolean,
   today: string,
 ): boolean {
   if (isDelayedFlag) return true;
-  return progressPct < 100 && dueDate != null && dueDate < today;
+  return progressPct < 100 && targetEndDate != null && targetEndDate < today;
 }
 
-/** When a task is no longer "open and past due", the STORED delayed flag should
- *  clear so a later slip re-notifies. True when complete, undated, or due today/
- *  later. Applied on every task write; the nightly job re-sets it on a fresh slip. */
+/** When a task is no longer "open and past its target end", the STORED delayed flag
+ *  should clear so a later slip re-notifies. True when complete, undated, or due
+ *  today/later. Applied on every task write; the nightly job re-sets it on a fresh slip. */
 export function shouldClearDelayed(
   progressPct: number,
-  dueDate: string | null,
+  targetEndDate: string | null,
   today: string,
 ): boolean {
-  return progressPct >= 100 || dueDate == null || dueDate >= today;
+  return progressPct >= 100 || targetEndDate == null || targetEndDate >= today;
 }
 
 /** A blocked task must carry a reason (form + server share this rule). */

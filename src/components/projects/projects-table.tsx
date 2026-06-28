@@ -12,6 +12,7 @@ import { DirectoryToolbar } from "@/components/directory/directory-toolbar";
 import { DirectoryEmptyState } from "@/components/directory/empty-state";
 import { TablePagination } from "@/components/directory/table-pagination";
 import { useListQuery } from "@/components/directory/use-list-query";
+import { ProgressMeter } from "@/components/projects/progress-meter";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
 import { ProjectStatusBadge } from "@/components/projects/project-status-badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
 import { formatDateTime } from "@/lib/datetime";
 import { deleteProjectAction } from "@/modules/projects/actions";
 import type { ProjectListRow } from "@/modules/projects/queries";
+import type { TemplateTree } from "@/modules/projects/templates/queries";
 
 type Option = { id: string; name: string };
 
@@ -42,21 +44,6 @@ type TableMeta = {
   onDelete: (p: ProjectListRow) => void;
   timeZone: string;
 };
-
-function ProgressMeter({ pct }: { pct: number }) {
-  const clamped = Math.max(0, Math.min(100, pct));
-  return (
-    <div className="flex items-center gap-2">
-      <div className="bg-muted h-1.5 w-20 overflow-hidden rounded-full">
-        <div
-          className="bg-primary h-full rounded-full transition-[width]"
-          style={{ width: `${clamped}%` }}
-        />
-      </div>
-      <span className="text-muted-foreground w-9 text-right text-xs tabular-nums">{clamped}%</span>
-    </div>
-  );
-}
 
 const columns: ColumnDef<ProjectListRow>[] = [
   {
@@ -169,6 +156,7 @@ export function ProjectsTable({
   canManage,
   clients,
   engineers,
+  templates,
   timeZone,
 }: {
   rows: ProjectListRow[];
@@ -179,6 +167,7 @@ export function ProjectsTable({
   canManage: boolean;
   clients: Option[];
   engineers: Option[];
+  templates: TemplateTree[];
   timeZone: string;
 }) {
   const router = useRouter();
@@ -296,6 +285,7 @@ export function ProjectsTable({
           project={null}
           clients={clients}
           engineers={engineers}
+          templates={templates}
           onOpenChange={setCreateOpen}
         />
       ) : null}

@@ -17,11 +17,11 @@ describe("isTaskDelayed (display derivation)", () => {
     expect(isTaskDelayed(40, null, true, TODAY)).toBe(true);
   });
 
-  it("derives true for an open task past its due date", () => {
+  it("derives true for an open task past its target end date", () => {
     expect(isTaskDelayed(40, "2026-06-21", false, TODAY)).toBe(true);
   });
 
-  it("is false when complete, undated, or due today/later", () => {
+  it("is false when complete, undated, or target end today/later", () => {
     expect(isTaskDelayed(100, "2026-06-21", false, TODAY)).toBe(false);
     expect(isTaskDelayed(40, null, false, TODAY)).toBe(false);
     expect(isTaskDelayed(40, "2026-06-22", false, TODAY)).toBe(false);

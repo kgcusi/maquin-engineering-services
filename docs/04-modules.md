@@ -202,6 +202,51 @@ those engineers see it on their dashboard while unassigned engineers do not.
 
 ---
 
+### 5.8a Project Templates — admin reference data
+
+> **Built** alongside the Stage 2 review ([02](02-data-model.md) §4.6,
+> [17](17-audit-decisions.md) §10.17). Admin-managed presets that seed a project's phase/task tree.
+
+**Purpose.** Stop re-typing the same phase/task breakdown for every project. An admin authors a
+reusable **template** (phases with a *duration in days*, tasks with a *weight*); creating a project
+**from a template** clones the tree and computes a schedule.
+
+**Key data.** `project_templates`, `project_template_phases` (`duration_days`),
+`project_template_tasks` (`weight_pct`) — [02](02-data-model.md) §4.6.
+
+**Screens.** Setup → **Templates** list · Create/edit template (phases with duration, tasks with
+weight + the same "% unallocated" affordance as the task form) · the **"Start from template"**
+picker + **review step** inside Create Project.
+
+**Rules.**
+- **Calendar-day chaining.** From one project start date, phase 1 starts on the project start and
+  each next phase the day *after* the prior phase's computed end (`end = start + duration − 1`,
+  inclusive). The result is shown in a **review step where per-phase durations are adjustable
+  (validated ≥ 1) before any rows are written** — nothing hits the project until the user confirms.
+- **Editable tasks at the review step.** Under each (fixed) phase the review seeds the template's
+  tasks as a **fully editable list** — rename, reweight, remove, or add — so a phase that's already
+  100%-allocated isn't a dead end. A phase's task weights may not exceed 100% (guarded client-side
+  and in the service). The client sends the **full edited list per phase**, so the template's stored
+  tasks aren't re-read at instantiation. Phases themselves are **not** addable/removable at review —
+  the structure stays the template's (edit phases after the project exists).
+- **Snapshot, not link.** Instantiation is a one-time copy; editing the project never touches the
+  template and vice-versa. Tasks carry **no dates** (phase-level scheduling only, v1).
+- **Atomic.** The shared `instantiateTemplate(tx, …)` service inserts the project's phases
+  (`target_start_date`/`target_end_date` from the chain; actuals null; `progress_pct` 0) and their
+  tasks (name + weight + sequence) in **one transaction** ([17](17-audit-decisions.md) §10.17).
+- Two entry points share that service: **at creation** (the primary path) and **apply to an existing
+  project that has zero phases** (an "Apply template" affordance on the empty Phases tab, guarded by
+  `project.update`).
+
+**Permissions.** `template.view`, `template.manage` (admin). Out of v1: "save project as template",
+working-day/holiday calendars, task-level durations.
+
+**Done when.** An admin authors a template; an admin creates a project from it, bumps a 7-day phase
+to 9 days at the review step, confirms, and the project's phases carry the chained target dates with
+tasks weighted and progress 0.
+
+---
+
 ### 5.9 Project Phases & Tasks
 **Purpose.** Break a project into Phases → Tasks to track progress, timeline, delays.
 
@@ -270,37 +315,51 @@ material for the project and appear in the issued/used/remaining report.
 
 ---
 
-### 5.10a Inspections (QA/QC) — post-Stage-2
+### 5.10a Inspections (QA/QC) — implemented
 
-> **Deferred.** The `QA_QC_ENGINEER` role, the reserved `inspection.*` keys, and the `INSPECTOR`
-> membership grant ship in **Stage 2**; the module below (screens + flow) ships afterwards
-> ([02](02-data-model.md) §4.5, [17](17-audit-decisions.md) §10).
+> **Built.** Base request → pass/fail module shipped in Stage 2 (uncommitted at audit time);
+> the **structured checklist + per-item photos + re-inspection history** enhancement is layered
+> on top ([02](02-data-model.md) §4.5, [17](17-audit-decisions.md) §10.9–10.10, §10.16). Project-scoped,
+> on its own **Inspections** tab — not bound to a task or phase.
 
-**Purpose.** Engineers request a quality/QA inspection on a task or project; a QA/QC engineer
-inspects and records a pass/fail result, looping back to rework when it fails.
+**Purpose.** An engineer requests a QA/QC inspection; the QA/QC engineer runs a checklist (each
+item PASS/FAIL/N-A + remarks + optional photos), sets the overall pass/fail, and — when it fails —
+**re-inspects the same record in place**, with every recording kept as an attempt in the history.
 
-**Key data.** `inspection_requests` (reserved — [02](02-data-model.md) §4.5); attachments via the
-polymorphic `attachments` table (`entity_type = 'inspection'`).
+**Key data.** `inspections`, `inspection_attempts` (the history log), `inspection_item_results`
+(per-attempt snapshot), and the admin presets `inspection_checklists` / `inspection_checklist_items`
+([02](02-data-model.md) §4.5). Per-item photos via the polymorphic `attachments` table
+(`entity_type = 'inspection_item_result'`).
 
-**Actors.** Engineer requests (`inspection.request`); QA/QC engineer records the result
-(`inspection.record`); Admin oversees (`inspection.view.all`).
+**Actors.** Engineer requests (`inspection.request`); QA/QC engineer records / re-inspects
+(`inspection.record`); admins author the preset checklists (`checklist.manage`).
 
 **Flow.**
-- Engineer raises a request and **names the QA/QC engineer** (`assigned_to`). On create the
-  system (a) **notifies that QA/QC engineer** (`inspection.requested`) and (b) inserts a
-  `project_members(role_on_project='INSPECTOR')` row so they can open the otherwise-scoped
-  project ([17](17-audit-decisions.md) §10). No request → no membership → 404.
-- The QA/QC engineer inspects and records `PASSED` / `FAILED`; a fail sets `REWORK` and routes
-  back to the task. Recording fires `inspection.recorded` to the requester.
+- Engineer raises a request and **names the QA/QC engineer** (`inspector_id`) + what's inspected.
+  On create the system (a) **notifies that QA/QC engineer** (`inspection.requested`) and (b) inserts
+  a `project_members(role_on_project='INSPECTOR')` row so they can open the otherwise-scoped project
+  ([17](17-audit-decisions.md) §10.12). No request → no membership → 404.
+- The QA/QC engineer opens the inspection, **picks a preset checklist by category** (optional — no
+  checklist = today's free-form pass/fail), marks each item **PASS / FAIL / N-A** (+remarks, +photos),
+  then **sets the overall `PASSED` / `FAILED` themselves** (items are evidence, not an auto-gate).
+  Recording appends an `inspection_attempts` row (with its snapshotted `inspection_item_results`),
+  sets the inspection's latest `status`/`outcome_remarks`, and fires `inspection.completed` to the
+  requester.
+- **Re-inspection = reopen in place** ([17](17-audit-decisions.md) §10.16): a FAILED inspection is
+  re-inspected on the **same** record — the outcome dialog pre-fills from the last attempt (passed
+  items carry forward, editable), and a fresh attempt is appended. No new request, no new record;
+  the history shows the full attempt timeline.
+- The requester (or an admin) may **withdraw** a request that's still `REQUESTED` (soft-delete).
 
-**Events.** `inspection.requested` (→ the named QA/QC engineer), `inspection.recorded` (→ the
+**Events.** `inspection.requested` (→ the named QA/QC engineer), `inspection.completed` (→ the
 requester) — [08](08-notifications.md).
 
-**Permissions.** `inspection.request` (Engineer, scoped), `inspection.record` (QA/QC, scoped),
-`inspection.view.assigned` / `inspection.view.all`.
+**Permissions.** `inspection.view`, `inspection.request` (Engineer, scoped), `inspection.record`
+(QA/QC, scoped); `checklist.view` / `checklist.manage` for the preset library (admin).
 
-**Done when.** An engineer requests an inspection, the named QA/QC engineer is notified and can
-open the project, records a pass/fail, and a fail loops the task back to rework.
+**Done when.** An engineer requests an inspection; the named QA/QC engineer is notified, opens the
+project, runs a checklist, records FAILED with a flagged item + photo, then re-inspects the same
+record to PASSED — and the inspection shows a two-attempt history.
 
 ---
 
@@ -592,8 +651,7 @@ Full design: [10-dashboard.md](10-dashboard.md).
 | Stage ([14](14-implementation-roadmap.md)) | Modules |
 |-------|---------|
 | 1 — Setup & Core | 5.1, 5.2, 5.3, 5.4 (scaffold), 5.5, 5.6, 5.7 |
-| 2 — Project Tracking | 5.8, 5.9, 5.10, + project notifications; `QA_QC_ENGINEER` role + scoping |
+| 2 — Project Tracking | 5.8, **5.8a Templates**, 5.9, 5.10, **5.10a Inspections** (+ checklist/history enhancement), + project notifications; `QA_QC_ENGINEER` role + scoping |
 | 3 — Inventory | 5.14, 5.15, 5.16, 5.17, 5.18, 5.19 |
 | 4 — Financial | 5.11, 5.12, 5.13 |
 | 5 — Output | 5.20, 5.21, full 5.4 wiring, testing, polish |
-| Deferred (post-Stage-2) | 5.10a Inspections (QA/QC module — role/keys reserved in Stage 2) |

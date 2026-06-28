@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ClientDetail } from "@/components/clients/client-detail";
 import { requirePagePermission } from "@/lib/page-guards";
 import { getClientById, getClientDocuments, getClientNotes } from "@/modules/clients/queries";
+import { listClientProjects } from "@/modules/projects/queries";
 import { getSettings } from "@/modules/settings/queries";
 import { pageParam } from "@/modules/shared/list-params";
 
@@ -22,10 +23,11 @@ export default async function ClientDetailPage({
   const docsPage = pageParam(sp.docsPage);
   const notesPage = pageParam(sp.notesPage);
 
-  const [client, documents, notes, settings] = await Promise.all([
+  const [client, documents, notes, projects, settings] = await Promise.all([
     getClientById(id),
     getClientDocuments(id, docsPage),
     getClientNotes(id, notesPage),
+    listClientProjects(id),
     getSettings(),
   ]);
   if (!client) notFound();
@@ -35,6 +37,7 @@ export default async function ClientDetailPage({
       client={client}
       documents={documents}
       notes={notes}
+      projects={projects}
       timeZone={settings.timezone}
     />
   );

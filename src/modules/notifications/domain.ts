@@ -11,6 +11,17 @@ export type RecipientRule =
   | { kind: "PROJECT"; selector: string }
   | { kind: "NONE" };
 
+/** A recipient_rule may be a union of selectors joined by "+", e.g.
+ *  "ROLE:ADMIN+PROJECT:LEAD". Split into individual selectors (the resolver unions
+ *  their recipients). A single selector returns a one-element list; null → []. */
+export function splitRecipientRules(rule: string | null | undefined): string[] {
+  if (!rule) return [];
+  return rule
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 /** Parse a notification_settings.recipient_rule selector (e.g. "ROLE:ADMIN"). */
 export function parseRecipientRule(rule: string | null | undefined): RecipientRule {
   if (!rule) return { kind: "NONE" };
@@ -66,6 +77,46 @@ export function parseChannels(value: unknown): NotificationChannel[] {
   return out;
 }
 
+/** Order-insensitive equality of two channel lists (drives the settings "dirty"
+ *  check and skips no-op upserts in the update action). */
+export function channelsEqual(a: NotificationChannel[], b: NotificationChannel[]): boolean {
+  return a.length === b.length && a.every((c) => b.includes(c));
+}
+
+const ROLE_RECIPIENT_LABELS: Record<string, string> = {
+  ADMIN: "Admins",
+  ENGINEER: "Engineers",
+  QA_QC_ENGINEER: "QA/QC engineers",
+  WEBMASTER: "Webmaster",
+};
+
+const USER_FIELD_LABELS: Record<string, string> = {
+  assigneeId: "The assignee",
+  requesterId: "The requester",
+  requestedById: "The requester",
+  inspectorId: "The inspector",
+  submitterId: "The submitter",
+  userId: "The user",
+};
+
+/** Human-readable description of a recipient_rule for the settings panel — a
+ *  "+"-joined union renders as a "·"-joined phrase, e.g.
+ *  "ROLE:ADMIN+PROJECT:LEAD" → "Admins · Project lead". */
+export function describeRecipientRule(rule: string | null | undefined): string {
+  const tokens = splitRecipientRules(rule);
+  if (tokens.length === 0) return "No automatic recipients";
+  return tokens
+    .map((token) => {
+      const parsed = parseRecipientRule(token);
+      if (parsed.kind === "ROLE") return ROLE_RECIPIENT_LABELS[parsed.role] ?? parsed.role;
+      if (parsed.kind === "USER") return USER_FIELD_LABELS[parsed.field] ?? "A specific user";
+      if (parsed.kind === "PROJECT")
+        return parsed.selector.includes("LEAD") ? "Project lead" : "Project team";
+      return "—";
+    })
+    .join(" · ");
+}
+
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -82,4 +133,34 @@ export function buildNotificationContent(
     entityType: readString(payload.entityType),
     entityId: readString(payload.entityId),
   };
+}
+
+/** Resolve the in-app deep-link (a relative href) for an event from its payload.
+ *  Prefix-based on the event key so events gain a target as their module starts
+ *  emitting `projectId`. Returns null when there's nothing navigable to point at. */
+export function buildNotificationLink(
+  eventKey: string,
+  payload: Record<string, unknown>,
+): string | null {
+  const projectId = readString(payload.projectId);
+  const entityId = readString(payload.entityId);
+
+  // Project events: entityId IS the project id (no separate projectId in payload).
+  if (eventKey.startsWith("project.")) {
+    const pid = projectId ?? entityId;
+    return pid ? `/projects/${pid}` : null;
+  }
+  if (!projectId) return null;
+  if (eventKey.startsWith("task.") || eventKey.startsWith("phase.")) {
+    return `/projects/${projectId}?tab=phases`;
+  }
+  if (eventKey.startsWith("inspection.")) {
+    return `/projects/${projectId}?tab=inspections`;
+  }
+  if (eventKey.startsWith("dsr.")) {
+    return entityId
+      ? `/projects/${projectId}/dsr/${entityId}`
+      : `/projects/${projectId}?tab=reports`;
+  }
+  return null;
 }

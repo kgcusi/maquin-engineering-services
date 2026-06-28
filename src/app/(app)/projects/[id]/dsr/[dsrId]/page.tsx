@@ -8,7 +8,12 @@ import { DsrEditor } from "@/components/projects/dsr/dsr-editor";
 import { DsrStatusBadge } from "@/components/projects/dsr-status-badge";
 import { requirePagePermission } from "@/lib/page-guards";
 import { formatDateTime } from "@/lib/datetime";
-import { hasPermission } from "@/lib/rbac";
+import {
+  canDeleteDsr,
+  canEditDsr,
+  canReopenDsr,
+  canReviewDsr,
+} from "@/modules/projects/dsr/domain";
 import { getDsrEditor, getDsrPhotos } from "@/modules/projects/dsr/queries";
 import type { ProjectViewer } from "@/modules/projects/queries";
 import { getSettings } from "@/modules/settings/queries";
@@ -31,16 +36,20 @@ export default async function DsrEditorPage({
   const sp = await searchParams;
   const photoPage = pageParam(sp.photoPage);
 
-  const [dsr, photos, settings] = await Promise.all([
-    getDsrEditor(viewer, dsrId),
-    getDsrPhotos(dsrId, photoPage),
-    getSettings(),
-  ]);
-  if (!dsr) notFound();
+  // Access-check the DSR first (getDsrEditor is membership-baked); only then load
+  // its photos. Also 404 when the URL's project id doesn't match the DSR's real
+  // project, so a mismatched link can't render with a wrong back-target.
+  const [dsr, settings] = await Promise.all([getDsrEditor(viewer, dsrId), getSettings()]);
+  if (!dsr || dsr.projectId !== id) notFound();
 
-  const isAdmin = hasPermission(role, "dsr.view.all");
-  const canEdit = dsr.status === "DRAFT" && (viewer.id === dsr.createdBy || isAdmin);
-  const canReopen = dsr.status === "SUBMITTED" && isAdmin;
+  const photos = await getDsrPhotos(dsrId, photoPage);
+
+  const policyViewer = { id: viewer.id, role };
+  const policyTarget = { status: dsr.status, createdBy: dsr.createdBy };
+  const canEdit = canEditDsr(policyViewer, policyTarget);
+  const canReopen = canReopenDsr(policyViewer, policyTarget);
+  const canReview = canReviewDsr(policyViewer, policyTarget);
+  const canDelete = canDeleteDsr(policyViewer, policyTarget);
 
   const reportDate = formatDateTime(`${dsr.reportDate}T00:00:00`, settings.timezone, "date");
 
@@ -65,7 +74,7 @@ export default async function DsrEditorPage({
           <span>Daily site report</span>
           <span aria-hidden>·</span>
           <span className="font-mono text-xs tracking-tight">{dsr.refCode}</span>
-          {dsr.status === "SUBMITTED" && dsr.submittedByName ? (
+          {dsr.status !== "DRAFT" && dsr.submittedByName ? (
             <>
               <span aria-hidden>·</span>
               <span>
@@ -85,6 +94,8 @@ export default async function DsrEditorPage({
         timeZone={settings.timezone}
         canEdit={canEdit}
         canReopen={canReopen}
+        canReview={canReview}
+        canDelete={canDelete}
       />
     </div>
   );

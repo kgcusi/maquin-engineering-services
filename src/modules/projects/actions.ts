@@ -7,6 +7,7 @@ import { projectMembers } from "@/db/schema/project-members";
 import { projects } from "@/db/schema/projects";
 import { orNull, requireEntityRef } from "@/lib/action-helpers";
 import { audit, diffFields } from "@/lib/audit";
+import { todayInTimeZone } from "@/lib/datetime";
 import { emitEvent } from "@/lib/events";
 import { Money } from "@/lib/money";
 import { ActionError, action, actionNoTx, assertProjectAccess } from "@/lib/rbac";
@@ -18,9 +19,11 @@ import {
   removeAttachment,
 } from "@/modules/files/service";
 import { addNote, removeNote } from "@/modules/notes/service";
+import { getSettings } from "@/modules/settings/queries";
 import { nextRefCode } from "@/lib/refcodes";
 
 import { canTransitionProject, normalizeTeam } from "./domain";
+import { instantiateTemplate } from "./templates/service";
 import {
   addProjectNoteSchema,
   changeProjectStatusSchema,
@@ -85,13 +88,38 @@ export const createProjectAction = action(
     const rows = teamRows(created.id, leadId, memberIds);
     if (rows.length) await tx.insert(projectMembers).values(rows);
 
+    // Optionally seed phases/tasks from a template — same transaction, so the
+    // project + its whole tree commit atomically (docs/17 §10.17).
+    let seeded: { phaseCount: number; taskCount: number } | null = null;
+    if (input.template) {
+      if (!input.startDate) {
+        throw new ActionError("Pick a start date to schedule the template's phases.");
+      }
+      const overrides = new Map(
+        input.template.phases.map((p) => [p.templatePhaseId, p.durationDays]),
+      );
+      const tasksByPhase = new Map(input.template.phases.map((p) => [p.templatePhaseId, p.tasks]));
+      seeded = await instantiateTemplate(tx, {
+        projectId: created.id,
+        templateId: input.template.templateId,
+        startDate: input.startDate,
+        durationOverrides: overrides,
+        tasksByPhase,
+      });
+    }
+
     await audit(tx, {
       actorId: actor.id,
       action: "project.created",
       entityType: ENTITY,
       entityId: created.id,
       summary: `Created project ${refCode} — ${input.name}`,
-      diff: { name: input.name, refCode, memberCount: rows.length },
+      diff: {
+        name: input.name,
+        refCode,
+        memberCount: rows.length,
+        ...(seeded ? { templatePhases: seeded.phaseCount, templateTasks: seeded.taskCount } : {}),
+      },
     });
     await emitEvent(tx, {
       type: "project.created",
@@ -214,7 +242,7 @@ export const changeProjectStatusAction = action(
 
     const actualEndDate =
       to === "COMPLETED"
-        ? (orNull(input.actualEndDate) ?? new Date().toISOString().slice(0, 10))
+        ? (orNull(input.actualEndDate) ?? todayInTimeZone((await getSettings()).timezone))
         : null;
 
     await tx

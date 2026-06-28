@@ -5,6 +5,9 @@ import {
   backoffMs,
   buildIdempotencyKey,
   buildNotificationContent,
+  buildNotificationLink,
+  channelsEqual,
+  describeRecipientRule,
   parseChannels,
   parseRecipientRule,
 } from "./domain";
@@ -77,6 +80,33 @@ describe("parseChannels", () => {
   });
 });
 
+describe("channelsEqual", () => {
+  it("is order-insensitive and length-aware", () => {
+    expect(channelsEqual(["EMAIL", "IN_APP"], ["IN_APP", "EMAIL"])).toBe(true);
+    expect(channelsEqual([], [])).toBe(true);
+    expect(channelsEqual(["EMAIL"], ["EMAIL", "IN_APP"])).toBe(false);
+    expect(channelsEqual(["EMAIL"], ["IN_APP"])).toBe(false);
+  });
+});
+
+describe("describeRecipientRule", () => {
+  it("describes single selectors", () => {
+    expect(describeRecipientRule("ROLE:ADMIN")).toBe("Admins");
+    expect(describeRecipientRule("USER:assigneeId")).toBe("The assignee");
+    expect(describeRecipientRule("PROJECT:LEAD")).toBe("Project lead");
+    expect(describeRecipientRule("PROJECT:TEAM")).toBe("Project team");
+  });
+
+  it("joins a composite union with a middot", () => {
+    expect(describeRecipientRule("ROLE:ADMIN+PROJECT:LEAD")).toBe("Admins · Project lead");
+  });
+
+  it("handles no-recipient rules", () => {
+    expect(describeRecipientRule(null)).toBe("No automatic recipients");
+    expect(describeRecipientRule("")).toBe("No automatic recipients");
+  });
+});
+
 describe("buildNotificationContent", () => {
   it("uses payload.message / .summary and pulls the entity ref", () => {
     expect(
@@ -100,5 +130,58 @@ describe("buildNotificationContent", () => {
       entityType: null,
       entityId: null,
     });
+  });
+});
+
+describe("buildNotificationLink", () => {
+  it("points project events at the project (entityId is the project id)", () => {
+    expect(
+      buildNotificationLink("project.created", { entityType: "project", entityId: "p1" }),
+    ).toBe("/projects/p1");
+    expect(buildNotificationLink("project.status_changed", { projectId: "p1" })).toBe(
+      "/projects/p1",
+    );
+  });
+
+  it("points task and phase events at the Phases & Tasks tab", () => {
+    expect(buildNotificationLink("task.blocked", { projectId: "p1", taskId: "t1" })).toBe(
+      "/projects/p1?tab=phases",
+    );
+    expect(buildNotificationLink("task.assigned", { projectId: "p1" })).toBe(
+      "/projects/p1?tab=phases",
+    );
+    expect(buildNotificationLink("phase.critical_update", { projectId: "p1" })).toBe(
+      "/projects/p1?tab=phases",
+    );
+  });
+
+  it("points inspection events at the Inspections tab", () => {
+    expect(
+      buildNotificationLink("inspection.requested", {
+        projectId: "p1",
+        entityType: "inspection",
+        entityId: "i1",
+      }),
+    ).toBe("/projects/p1?tab=inspections");
+  });
+
+  it("points DSR events at the specific report, or the reports tab without an id", () => {
+    expect(
+      buildNotificationLink("dsr.reviewed", {
+        projectId: "p1",
+        entityType: "daily_report",
+        entityId: "d1",
+      }),
+    ).toBe("/projects/p1/dsr/d1");
+    expect(buildNotificationLink("dsr.submitted", { projectId: "p1" })).toBe(
+      "/projects/p1?tab=reports",
+    );
+  });
+
+  it("returns null for non-navigable or under-specified events", () => {
+    expect(buildNotificationLink("user.created", { userId: "u1" })).toBeNull();
+    expect(buildNotificationLink("auth.login.failed", {})).toBeNull();
+    expect(buildNotificationLink("task.blocked", { taskId: "t1" })).toBeNull();
+    expect(buildNotificationLink("project.created", {})).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -39,7 +39,14 @@ function FieldError({ message }: { message?: string }) {
 
 type PhaseSummary = Pick<
   PhaseWithTasks,
-  "id" | "name" | "sequence" | "startDate" | "targetEndDate" | "remarks"
+  | "id"
+  | "name"
+  | "sequence"
+  | "targetStartDate"
+  | "targetEndDate"
+  | "actualStartDate"
+  | "actualEndDate"
+  | "remarks"
 >;
 
 type Props = {
@@ -101,11 +108,17 @@ function PhaseForm({
       projectId,
       name: phase?.name ?? "",
       sequence: phase?.sequence ?? nextSequence,
-      startDate: phase?.startDate ?? "",
+      targetStartDate: phase?.targetStartDate ?? "",
       targetEndDate: phase?.targetEndDate ?? "",
+      actualStartDate: phase?.actualStartDate ?? "",
+      actualEndDate: phase?.actualEndDate ?? "",
       remarks: phase?.remarks ?? "",
     },
   });
+
+  // Drives the soft "end ≥ start" calendar bound (the Zod superRefine is the real guard).
+  const targetStart = useWatch({ control, name: "targetStartDate" });
+  const actualStart = useWatch({ control, name: "actualStartDate" });
 
   function onSubmit(values: CreatePhaseInput) {
     start(async () => {
@@ -114,8 +127,10 @@ function PhaseForm({
             id: phase.id,
             name: values.name,
             sequence: values.sequence,
-            startDate: values.startDate,
+            targetStartDate: values.targetStartDate,
             targetEndDate: values.targetEndDate,
+            actualStartDate: values.actualStartDate,
+            actualEndDate: values.actualEndDate,
             remarks: values.remarks,
           })
         : await createPhaseAction(values);
@@ -159,40 +174,79 @@ function PhaseForm({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="phase-startDate">Start date</Label>
-          <Controller
-            control={control}
-            name="startDate"
-            render={({ field }) => (
-              <DatePicker
-                id="phase-startDate"
-                value={field.value ?? ""}
-                onChange={field.onChange}
-                disabled={isPending}
-                aria-label="Phase start date"
-              />
-            )}
-          />
-          <FieldError message={errors.startDate?.message} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="phase-targetEndDate">Target end date</Label>
-          <Controller
-            control={control}
-            name="targetEndDate"
-            render={({ field }) => (
-              <DatePicker
-                id="phase-targetEndDate"
-                value={field.value ?? ""}
-                onChange={field.onChange}
-                disabled={isPending}
-                aria-label="Phase target end date"
-              />
-            )}
-          />
-          <FieldError message={errors.targetEndDate?.message} />
+      <div className="space-y-3">
+        <p className="text-muted-foreground text-xs font-medium">Schedule — target vs actual</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="phase-targetStartDate">Target start</Label>
+            <Controller
+              control={control}
+              name="targetStartDate"
+              render={({ field }) => (
+                <DatePicker
+                  id="phase-targetStartDate"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  disabled={isPending}
+                  aria-label="Phase target start date"
+                />
+              )}
+            />
+            <FieldError message={errors.targetStartDate?.message} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="phase-targetEndDate">Target end</Label>
+            <Controller
+              control={control}
+              name="targetEndDate"
+              render={({ field }) => (
+                <DatePicker
+                  id="phase-targetEndDate"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  min={targetStart || undefined}
+                  disabled={isPending}
+                  aria-label="Phase target end date"
+                />
+              )}
+            />
+            <FieldError message={errors.targetEndDate?.message} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="phase-actualStartDate">Actual start</Label>
+            <Controller
+              control={control}
+              name="actualStartDate"
+              render={({ field }) => (
+                <DatePicker
+                  id="phase-actualStartDate"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  disabled={isPending}
+                  aria-label="Phase actual start date"
+                />
+              )}
+            />
+            <FieldError message={errors.actualStartDate?.message} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="phase-actualEndDate">Actual end</Label>
+            <Controller
+              control={control}
+              name="actualEndDate"
+              render={({ field }) => (
+                <DatePicker
+                  id="phase-actualEndDate"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  min={actualStart || undefined}
+                  disabled={isPending}
+                  aria-label="Phase actual end date"
+                />
+              )}
+            />
+            <FieldError message={errors.actualEndDate?.message} />
+          </div>
         </div>
       </div>
 

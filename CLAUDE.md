@@ -76,6 +76,18 @@ The inventory ledger needs multi-statement transactions, so:
 - **No dead code / no commented-out blocks / no unused imports** (ESLint `unused-imports` enforces it; `src/components/ui/**` is exempt — shadcn-owned).
 - Server-side authorization on every request; engineers scoped to their projects at the **query** level.
 
+## Testing (when to run)
+
+Don't run the full Vitest suite on every change. Run tests only when:
+
+- a `*.test.ts` file is added or edited, **or**
+- you modify source that existing tests cover.
+
+Run **scoped** — the affected file(s) (`pnpm test src/lib/rbac.test.ts`) or
+`pnpm exec vitest related <changed-files> --run` — not all 76. Run the **full
+suite** (`pnpm test`) only at a stage-completion gate or when asked. Type-check,
+lint, and build are unaffected.
+
 ## Layout (`docs/01` §4)
 
 `src/db/{client.ts,schema/,seed.ts}` · `src/lib/{auth,rbac,events,mailer,storage,money,refcodes,audit}.ts`

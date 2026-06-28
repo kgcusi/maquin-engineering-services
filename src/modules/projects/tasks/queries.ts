@@ -16,10 +16,12 @@ export type TaskRow = {
   name: string;
   assigneeId: string | null;
   assigneeName: string | null;
-  startDate: string | null;
-  dueDate: string | null;
-  completedDate: string | null;
+  targetStartDate: string | null;
+  targetEndDate: string | null;
+  actualStartDate: string | null;
+  actualEndDate: string | null;
   progressPct: number;
+  weightPct: number;
   isBlocked: boolean;
   blockedReason: string | null;
   isDelayed: boolean;
@@ -30,8 +32,10 @@ export type PhaseWithTasks = {
   id: string;
   name: string;
   sequence: number;
-  startDate: string | null;
+  targetStartDate: string | null;
   targetEndDate: string | null;
+  actualStartDate: string | null;
+  actualEndDate: string | null;
   progressPct: number;
   remarks: string | null;
   tasks: TaskRow[];
@@ -43,8 +47,10 @@ export async function listPhasesWithTasks(projectId: string): Promise<PhaseWithT
       id: phases.id,
       name: phases.name,
       sequence: phases.sequence,
-      startDate: phases.startDate,
+      targetStartDate: phases.targetStartDate,
       targetEndDate: phases.targetEndDate,
+      actualStartDate: phases.actualStartDate,
+      actualEndDate: phases.actualEndDate,
       progressPct: phases.progressPct,
       remarks: phases.remarks,
     })
@@ -62,10 +68,12 @@ export async function listPhasesWithTasks(projectId: string): Promise<PhaseWithT
       name: tasks.name,
       assigneeId: tasks.assigneeId,
       assigneeName: user.name,
-      startDate: tasks.startDate,
-      dueDate: tasks.dueDate,
-      completedDate: tasks.completedDate,
+      targetStartDate: tasks.targetStartDate,
+      targetEndDate: tasks.targetEndDate,
+      actualStartDate: tasks.actualStartDate,
+      actualEndDate: tasks.actualEndDate,
       progressPct: tasks.progressPct,
+      weightPct: tasks.weightPct,
       isBlocked: tasks.isBlocked,
       blockedReason: tasks.blockedReason,
       isDelayed: tasks.isDelayed,
@@ -74,7 +82,7 @@ export async function listPhasesWithTasks(projectId: string): Promise<PhaseWithT
     .from(tasks)
     .leftJoin(user, eq(tasks.assigneeId, user.id))
     .where(and(inArray(tasks.phaseId, phaseIds), isNull(tasks.deletedAt)))
-    .orderBy(asc(tasks.dueDate), asc(tasks.createdAt));
+    .orderBy(asc(tasks.targetEndDate), asc(tasks.createdAt));
 
   const byPhase = new Map<string, TaskRow[]>();
   for (const t of taskRows) {
@@ -115,7 +123,7 @@ export async function countOpenPastDue(projectId: string, today: string): Promis
         eq(phases.projectId, projectId),
         isNull(tasks.deletedAt),
         sql`${tasks.progressPct} < 100`,
-        sql`${tasks.dueDate} < ${today}`,
+        sql`${tasks.targetEndDate} < ${today}`,
       ),
     );
   return row?.value ?? 0;

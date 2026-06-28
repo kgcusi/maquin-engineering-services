@@ -23,6 +23,12 @@ erDiagram
     CLIENTS ||--o{ PROJECTS : "client of"
     PROJECTS ||--o{ PHASES : has
     PHASES ||--o{ TASKS : has
+    PROJECTS ||--o{ INSPECTIONS : has
+    INSPECTIONS ||--o{ INSPECTION_ATTEMPTS : "recorded as"
+    INSPECTION_ATTEMPTS ||--o{ INSPECTION_ITEM_RESULTS : has
+    INSPECTION_CHECKLISTS ||--o{ INSPECTION_CHECKLIST_ITEMS : has
+    PROJECT_TEMPLATES ||--o{ PROJECT_TEMPLATE_PHASES : has
+    PROJECT_TEMPLATE_PHASES ||--o{ PROJECT_TEMPLATE_TASKS : has
     PROJECTS ||--o{ DAILY_REPORTS : has
     DAILY_REPORTS ||--o{ DSR_MATERIALS : records
     DAILY_REPORTS ||--o{ DSR_MANPOWER : records
@@ -268,37 +274,143 @@ Children:
 > carrying `source_id = dsr_materials.id`, so a re-opened DSR reverses the exact rows
 > ([17](17-audit-decisions.md) §10.4, [06](06-inventory-ledger.md) §6). Stage 2 reserves the link; Stage 3 wires the posting.
 
-### 4.5 Inspections — reserved (post-Stage-2)
+### 4.5 Inspections (implemented) — `src/db/schema/inspections.ts`
 
-> **Not built in Stage 2.** The `QA_QC_ENGINEER` role, the reserved `inspection.*` permission
-> keys, and the `project_members.role_on_project = 'INSPECTOR'` grant ship in Stage 2; the table
-> and flow below ship with the inspection module afterwards ([04](04-modules.md) §5.10a,
-> [17](17-audit-decisions.md) §10). Sketched here so the data model stays forward-consistent —
-> the same "reserve now, wire later" pattern as the DSR→ledger link above.
+A project-scoped QA/QC record on its own **Inspections** tab — NOT bound to a task or phase.
+An engineer raises a **request** naming a QA/QC engineer (which grants that user `INSPECTOR`
+membership so they can open the project; **no request → no membership → 404**, the engineer-scope
+invariant holds). The QA/QC engineer picks a **preset checklist at inspection time** (§4.5.1),
+records each item PASS/FAIL/N-A (+remarks, +optional photos), and **sets the overall PASS/FAIL
+themselves** — items are evidence, never an auto-gate. Advisory: an outcome never gates
+task/project completion ([04](04-modules.md) §5.10a, [17](17-audit-decisions.md) §10).
 
-`inspection_requests`
+`inspections`
 
 | Field | Type | Notes |
 |-------|------|-------|
 | id | uuid **PK** | |
 | ref_code | string **U** | `INS-2026-00042` (server-side counter) |
 | project_id | uuid **FK→projects** **idx** | |
-| task_id | uuid **FK→tasks** **N** | the task being inspected, optional |
-| requested_by | uuid **FK→user** | the engineer raising the request |
-| assigned_to | uuid **FK→user** **idx** | the QA/QC engineer named at request time — drives **both** the `inspection.requested` notification and the `INSPECTOR` membership grant ([17](17-audit-decisions.md) §10) |
-| type | text **N** | kind of inspection (fixed lookup later) |
-| status | enum(`REQUESTED`,`IN_PROGRESS`,`PASSED`,`FAILED`,`REWORK`) | the pass/fail/rework loop |
+| title | text | what's being inspected |
+| area / description | text **N** | |
 | scheduled_for | date **N** | |
-| result_notes | text **N** | |
-| recorded_by | uuid **FK→user** **N** | the QA/QC engineer who recorded the result |
-| recorded_at | timestamp **N** | |
+| inspector_id | **text** **FK→user** **N** **idx** | the QA/QC engineer (Better Auth text id); named at request time |
+| requested_by_id | **text** **FK→user** **N** | the engineer raising the request |
+| checklist_id | uuid **FK→inspection_checklists** **N** | preset chosen by QA/QC at inspection time; **null = free-form** pass/fail (today's behavior) |
+| status | enum(`REQUESTED`,`PASSED`,`FAILED`) **idx** | the **denormalized latest** outcome; default `REQUESTED` |
+| outcome_remarks | text **N** | latest overall remarks |
+| requested_at | timestamp | |
+| inspected_at | timestamp **N** | set when the first/any outcome is recorded |
+| created_at / updated_at / deleted_at | | soft-delete = **withdrawn** (only allowed while `REQUESTED`) |
+
+**Re-inspection = reopen in place, never a new request** ([17](17-audit-decisions.md) §10.16).
+A FAILED inspection is re-inspected on the same record; **every recording appends an
+`inspection_attempts` row** and the inspection's `status`/`outcome_remarks` reflect the latest.
+This avoids forcing a full re-request when only one of several items failed, while keeping a full
+attempt timeline.
+
+`inspection_attempts` (the append-only history log; one row per recording)
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| inspection_id | uuid **FK→inspections** (cascade) **idx** | |
+| attempt_no | int | 1-based, server-assigned (`max+1` in-tx) |
+| outcome | enum(`PASSED`,`FAILED`) | the overall call the QA/QC set for this attempt |
+| remarks | text **N** | overall remarks for this attempt |
+| recorded_by_id | **text** **FK→user** **N** | the QA/QC engineer who recorded it |
+| recorded_at / created_at | timestamp | |
+
+`inspection_item_results` (per-attempt snapshot of the checklist)
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| attempt_id | uuid **FK→inspection_attempts** (cascade) **idx** | |
+| label | text | **snapshot** of the checklist item label so later preset edits never rewrite history |
+| result | enum(`PASS`,`FAIL`,`NA`) | the per-item call (`INSPECTION_ITEM_RESULTS`, `src/lib/statuses.ts`) |
+| remarks | text **N** | |
+| sequence | int | display order |
+
+Per-item **photos** attach via the polymorphic **`attachments`** table
+(`entity_type = 'inspection_item_result'`, `entity_id = result.id`) over R2 — no per-inspection
+photo table.
+
+#### 4.5.1 Preset checklists (admin reference data — Setup → Checklists)
+
+Authored by admins; the QA/QC engineer selects one (by `category`) at inspection time. Items are
+**copied (snapshotted)** onto each attempt, so editing a preset never alters a recorded inspection.
+
+`inspection_checklists`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| name | string **idx** | |
+| category | text **N** | grouping for the picker (e.g. Concrete, Electrical) |
+| description | text **N** | |
+| is_active | boolean | inactive = hidden from the inspection picker |
+| created_by | **text** **FK→user** | |
 | created_at / updated_at / deleted_at | | |
 
-Attachments (inspection photos/reports) via the polymorphic **`attachments`** table
-(`entity_type = 'inspection'`). On create, the request inserts a `project_members` row
-(`role_on_project = 'INSPECTOR'`) for `assigned_to` so the existing membership-baked reads let
-the QA/QC engineer open the project; **no request → no membership → 404** (the engineer-scope
-invariant holds).
+`inspection_checklist_items`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| checklist_id | uuid **FK→inspection_checklists** (cascade) **idx** | |
+| label | text | the line the inspector marks PASS/FAIL/N-A |
+| guidance | text **N** | what to look for |
+| sequence | int | ordering |
+| created_at / updated_at | | |
+
+### 4.6 Project Templates — `src/db/schema/project-templates.ts`
+
+Admin-authored skeletons of **phases** (each with a *duration in days*) and **tasks** (name +
+weight). Creating a project **from a template** computes a **sequential calendar-day schedule**
+from a single project start date — phase 1 starts on the project start; each next phase the day
+*after* the prior phase's computed end (`end = start + duration − 1`, inclusive) — surfaced in a
+**review step where per-phase durations are adjustable before any rows are written**
+([04](04-modules.md) §5.8a, [17](17-audit-decisions.md) §10.17). **Snapshot semantics:** the cloned
+phases/tasks are an independent copy — editing the project never touches the template, and vice
+versa. Tasks carry **no dates** (phase-level scheduling only, v1).
+
+`project_templates`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| name | string **idx** | |
+| description | text **N** | |
+| is_active | boolean | inactive = hidden from the "Start from template" picker |
+| created_by | **text** **FK→user** | |
+| created_at / updated_at / deleted_at | | |
+
+`project_template_phases`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| template_id | uuid **FK→project_templates** (cascade) **idx** | |
+| name | string | |
+| sequence | int | ordering |
+| duration_days | int | default 7; **calendar** days; chained at instantiation, adjustable at the review step (validated ≥ 1) |
+| created_at / updated_at | | |
+
+`project_template_tasks`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| id | uuid **PK** | |
+| template_phase_id | uuid **FK→project_template_phases** (cascade) **idx** | |
+| name | string | |
+| sequence | int | ordering |
+| weight_pct | decimal(5,2) | task's share of the phase (0–100); copied verbatim to `tasks.weight_pct` |
+| created_at / updated_at | | |
+
+Instantiation inserts the project's `phases` (`target_start_date`/`target_end_date` from the
+chain; actuals null; `progress_pct` 0) and their `tasks` (name + weight + sequence) in **one
+transaction** via the shared `instantiateTemplate` service.
 
 ---
 
@@ -532,8 +644,11 @@ To generate `MR-2026-00042` safely under concurrency.
   `item_stock_balances(item_id, location_id)`, `ref_counters(scope, period)`.
 - Engineer scope + delay scan: **`project_members(user_id, project_id)`** (the scope predicate) and a
   partial **`tasks(due_date) WHERE progress_pct < 100`** for the daily delay job ([17](17-audit-decisions.md) §10).
-- _Reserved (post-Stage-2):_ `inspection_requests(project_id)` and `inspection_requests(assigned_to)`
-  for the QA/QC queue (§4.5) — ship with the inspection module.
+- Inspections: `inspections(project_id)` + `inspections(inspector_id)` for the QA/QC queue;
+  `inspection_attempts(inspection_id)` + `inspection_item_results(attempt_id)` for the history
+  timeline; `inspection_checklist_items(checklist_id)` (§4.5).
+- Templates: `project_template_phases(template_id)` + `project_template_tasks(template_phase_id)`
+  for loading a template tree (§4.6).
 - `stock_ledger`: composite index `(item_id, location_id, occurred_at)` for balance/ledger
   queries; `(source_type, source_id)` for traceability lookups.
 - `CHECK` constraints: `quantity >= 0` on request/movement quantities (signing happens in the

@@ -38,7 +38,10 @@ export const auth = betterAuth({
     // ⚠️ Contract: the future "deactivate user" action MUST revoke that user's
     // sessions (auth.api.revokeUserSessions / admin ban deletes session rows) so a
     // cached cookie can't outlive a disabled account beyond `maxAge` (docs/17 §3).
-    cookieCache: { enabled: true, maxAge: 300 },
+    // 60s: short enough that a deactivated user loses cached read access within a
+    // minute (the revoke contract above + the deactivate dialog's promise), while
+    // still serving the vast majority of renders from the cookie without a DB hit.
+    cookieCache: { enabled: true, maxAge: 60 },
   },
   user: {
     additionalFields: {

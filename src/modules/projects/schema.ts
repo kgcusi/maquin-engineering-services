@@ -3,6 +3,8 @@ import { z } from "zod";
 import { PROJECT_STATUSES } from "@/lib/statuses";
 import { entityDocumentSchemas, entityName, optionalText } from "@/modules/shared/contact-schema";
 
+import { projectTemplatePayloadSchema } from "./templates/schema";
+
 // Better Auth user ids are TEXT (not uuid) — use a non-empty string, never .uuid().
 const userIdField = z.string().trim().min(1);
 const optionalUserId = z.union([z.literal(""), userIdField]).optional();
@@ -28,6 +30,10 @@ export const createProjectSchema = z.object({
   // project's display label.
   leadEngineerId: optionalUserId,
   memberIds: z.array(userIdField).default([]),
+  // Optional: seed the project's phases/tasks from a template. `startDate` anchors
+  // the calendar-day chain (the action requires it when a template is chosen). The
+  // per-phase durations carry the user's review-step adjustments.
+  template: projectTemplatePayloadSchema.optional(),
 });
 
 export const updateProjectSchema = createProjectSchema.extend({ id: z.string().uuid() });

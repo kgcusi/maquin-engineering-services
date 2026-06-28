@@ -1,10 +1,12 @@
 import { z } from "zod";
 
-import { ROLES } from "@/lib/roles";
+import { ASSIGNABLE_ROLES } from "@/lib/roles";
 
-// WEBMASTER is deliberately not assignable — it is seed/DB-only and hidden
-// (src/lib/roles.ts HIDDEN_ROLES); the enum rejects it.
-const roleField = z.enum([ROLES.ADMIN, ROLES.ENGINEER], {
+// Single source of truth for assignable roles (ADMIN / ENGINEER / QA_QC_ENGINEER):
+// the same list feeds the form's dropdown, so the picker and this validator can
+// never drift. WEBMASTER is excluded from ASSIGNABLE_ROLES (seed/DB-only, hidden),
+// so the enum still rejects it.
+const roleField = z.enum(ASSIGNABLE_ROLES, {
   message: "Choose a role",
 });
 

@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -42,13 +43,18 @@ export const dailyReports = pgTable(
     status: dailyReportStatusEnum("status").notNull().default("DRAFT"),
     submittedBy: text("submitted_by").references(() => user.id, { onDelete: "set null" }),
     submittedAt: timestamp("submitted_at"),
+    reviewRemarks: text("review_remarks"),
+    reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at"),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     deletedAt: timestamp("deleted_at"),
   },
   (t) => [
-    uniqueIndex("daily_reports_project_date_unique").on(t.projectId, t.reportDate),
+    uniqueIndex("daily_reports_project_date_unique")
+      .on(t.projectId, t.reportDate)
+      .where(sql`${t.deletedAt} is null`),
     index("daily_reports_project_idx").on(t.projectId),
     index("daily_reports_submitted_by_idx").on(t.submittedBy),
   ],

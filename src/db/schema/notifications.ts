@@ -42,6 +42,9 @@ export const notifications = pgTable(
     // The affected entity, so a bell item / email can deep-link back.
     entityType: text("entity_type"),
     entityId: text("entity_id"),
+    // Resolved relative href (e.g. /projects/{id}?tab=phases) computed at dispatch
+    // from the event payload; null when the event has no navigable target.
+    link: text("link"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     sentAt: timestamp("sent_at"),
     deliveredAt: timestamp("delivered_at"),

@@ -8,6 +8,8 @@ import { projects } from "./projects";
 // A phase groups tasks within a project (docs/02 §4.3). Status is DERIVED from
 // progress, never stored. `progress_pct` is the average of its tasks' progress,
 // recomputed on each task write (docs/17 §10.3). `sequence` drives ordered display.
+// Target vs actual dates are tracked here too; actuals are entered MANUALLY (not
+// rolled up from the phase's tasks).
 export const phases = pgTable(
   "phases",
   {
@@ -17,8 +19,10 @@ export const phases = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     sequence: integer("sequence").notNull().default(0),
-    startDate: date("start_date"),
-    targetEndDate: date("target_end_date"),
+    targetStartDate: date("target_start_date", { mode: "string" }),
+    targetEndDate: date("target_end_date", { mode: "string" }),
+    actualStartDate: date("actual_start_date", { mode: "string" }),
+    actualEndDate: date("actual_end_date", { mode: "string" }),
     progressPct: percentColumn("progress_pct").notNull().default(0),
     remarks: text("remarks"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
